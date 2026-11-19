@@ -4,7 +4,7 @@ import { ResearchWorkspace } from './pages/ResearchWorkspace';
 
 export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'landing' | 'workspace'>('landing');
-  const [searchQuery, setSearchQuery] = useState('Graph Neural Networks');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const handleStartSearch = (query: string) => {
     setSearchQuery(query);

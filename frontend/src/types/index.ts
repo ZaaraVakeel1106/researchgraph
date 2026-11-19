@@ -29,6 +29,7 @@ export interface GraphEdge {
   type: string;
   label?: string;
   weight?: number;
+  rationale?: string;
 }
 
 export interface CommunityInfo {
@@ -95,15 +96,20 @@ export interface PaperReferenceItem {
 export interface PaperStudyData {
   id: string;
   title: string;
-  authors: { id?: string; name: string; institution?: string }[];
+  authors: { id?: string; name?: string; institutions?: { id?: string; name?: string }[] }[];
   institutions: { name: string }[];
-  publication_year: number;
-  venue: string;
-  citation_count: number;
+  publication_year?: number;
+  publication_date?: string;
+  venue?: string;
+  citation_count?: number;
+  open_access?: boolean;
   open_access_pdf?: string;
   doi?: string;
-  abstract: string;
-  abstract_breakdown: AbstractSection;
+  landing_page?: string;
+  source_url?: string;
+  abstract?: string;
+  topics: string[];
+  abstract_breakdown?: AbstractSection;
   research_context: {
     predecessors: { id: string; title: string; year: number; venue?: string }[];
     current: { id: string; title: string; year: number }[];
@@ -111,9 +117,8 @@ export interface PaperStudyData {
   };
   references: PaperReferenceItem[];
   cited_by: PaperReferenceItem[];
-  related_papers: { id: string; title: string; year: number; venue: string; citations: number; graph_rationale?: string }[];
-  recommended_next: { id: string; title: string; venue: string; year: number; graph_rationale: string }[];
-  local_graph: ResearchGraphData;
+  related_papers: PaperReferenceItem[];
+  recommended_next: { id: string; title: string; venue?: string; year?: number; graph_rationale?: string }[];
 }
 
 export interface ResearchGapSignal {
@@ -152,6 +157,7 @@ export interface BookmarkItem {
   subtitle?: string;
   folder_name: string;
   created_at: string;
+  metadata_json?: Record<string, any>;
 }
 
 export interface PaperNote {

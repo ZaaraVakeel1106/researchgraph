@@ -1,61 +1,46 @@
-import logging
-from typing import Dict, Any, List
+import networkx as nx
 from app.services.graph_service import graph_service
 
-logger = logging.getLogger("research_signals")
 
 class ResearchSignalService:
-    def get_structural_gaps(self, topic_query: str = "Graph Neural Networks") -> List[Dict[str, Any]]:
-        """Analyzes graph modularity and inter-community edge density to detect structural research gap signals."""
-        graph_data = graph_service.build_graph_for_topic(topic_query, mode="landscape")
-        communities = graph_data.get("communities", [])
+    async def get_structural_gaps(self, topic_query: str) -> list[dict]:
+        # Sparse graph connections do not establish a scientific research gap.
+        return []
 
-        signals = []
-        if len(communities) >= 2:
-            c1 = communities[0]
-            c2 = communities[1]
-            signals.append({
-                "id": "gap_sig_1",
-                "title": f"Under-connected area between {c1['dominant_topic']} and {c2['dominant_topic']}",
-                "community_a": c1["name"],
-                "community_b": c2["name"],
-                "observed_cross_edges": 2,
-                "expected_density": 0.45,
-                "confidence_score": 0.82,
-                "explanation": f"Detected high intra-community modularity in {c1['dominant_topic']} (size={c1['size']}) and {c2['dominant_topic']} (size={c2['size']}), but only 2 observed cross-community citation/co-authorship links in the dataset.",
-                "actionable_signal": f"Signal for further human investigation: Explore applying techniques from {c1['dominant_topic']} directly to problems in {c2['dominant_topic']}."
-            })
+    async def get_cross_domain_connections(self, domain_a: str, domain_b: str) -> dict:
+        left, right = await graph_service.build_graph_for_topic(domain_a, scope="related"), await graph_service.build_graph_for_topic(domain_b, scope="related")
+        node_map = {node["id"]: node for node in left["nodes"] + right["nodes"]}
+        graph = nx.Graph()
+        graph.add_nodes_from(node_map)
+        graph.add_edges_from((edge["source"], edge["target"]) for edge in left["edges"] + right["edges"] if edge["source"] in node_map and edge["target"] in node_map)
+        starts = [n["id"] for n in left["nodes"] if n["type"] == "paper" and n.get("relevance_tier") == "core"]
+        ends = {n["id"] for n in right["nodes"] if n["type"] == "paper" and n.get("relevance_tier") == "core"}
+        found_path = None
+        for start in starts:
+            if start not in graph:
+                continue
+            distances = nx.single_source_shortest_path_length(graph, start)
+            reachable = ends.intersection(distances)
+            if reachable:
+                end = min(reachable, key=lambda work_id: distances[work_id])
+                found_path = nx.shortest_path(graph, start, end)
+                break
+        details = [node_map[node_id] for node_id in found_path] if found_path else []
+        topics = list(dict.fromkeys(n["label"] for n in details if n.get("type") == "topic"))
+        authors = list(dict.fromkeys(n["id"] for n in details if n.get("type") == "author"))
+        researchers = [{"name": node_map[author]["label"], "institution": "Not available in the source",
+                        "betweenness": node_map[author].get("metrics", {}).get("betweenness_centrality", 0), "role": "Author on retrieved connection"}
+                       for author in authors]
+        if found_path:
+            summary = f"A structural path of {len(found_path) - 1} edges connects retrieved works for {domain_a} and {domain_b}. This path is a graph connection, not evidence of a scientific bridge."
+            path = {"found": True, "path_length": len(found_path) - 1, "path_nodes": found_path,
+                    "path_details": [{"id": n["id"], "label": n["label"], "type": n["type"]} for n in details],
+                    "explanation": "Undirected structural path through retrieved OpenAlex relationships."}
+        else:
+            summary = f"No structural connection was found in the bounded records retrieved for {domain_a} and {domain_b}."
+            path = {"found": False, "explanation": summary}
+        return {"domain_a": domain_a, "domain_b": domain_b, "bridge_found": bool(found_path), "shortest_path": path,
+                "bridging_topics": topics, "bridging_researchers": researchers, "structural_summary": summary}
 
-        # Add a topic-level under-connected signal
-        signals.append({
-            "id": "gap_sig_2",
-            "title": "Emerging topic bridge signal: Federated Learning ↔ Graph Neural Networks",
-            "community_a": "Privacy-Preserving AI Cluster",
-            "community_b": "Graph Representation Learning",
-            "observed_cross_edges": 1,
-            "expected_density": 0.38,
-            "confidence_score": 0.76,
-            "explanation": "Topic node 'Federated Learning' exhibits high betweenness centrality (0.245) while maintaining sparse direct citations to core GAT/GCN architectures.",
-            "actionable_signal": "Potential research opportunity in Decentralized & Privacy-Preserving Graph Representation Learning."
-        })
-
-        return signals
-
-    def get_cross_domain_connections(self, domain_a: str = "Computer Vision", domain_b: str = "Healthcare") -> Dict[str, Any]:
-        """Identifies bridging papers, authors, and intermediate topics connecting two distinct fields."""
-        path = graph_service.find_shortest_path("W2741809807", "W3112345678")
-        
-        return {
-            "domain_a": domain_a,
-            "domain_b": domain_b,
-            "bridge_found": path.get("found", True),
-            "shortest_path": path,
-            "bridging_topics": ["Graph Neural Networks", "Bioinformatics", "Medical Imaging"],
-            "bridging_researchers": [
-                {"name": "Pietro Liò", "institution": "University of Cambridge", "betweenness": 0.312, "role": "Cross-domain author"},
-                {"name": "Michael M. Bronstein", "institution": "University of Oxford", "betweenness": 0.285, "role": "Geometric Deep Learning researcher"}
-            ],
-            "structural_summary": f"Identified a 3-hop structural connection linking {domain_a} and {domain_b} via Graph Attention Networks and Biomedical Graph Embeddings."
-        }
 
 research_signal_service = ResearchSignalService()

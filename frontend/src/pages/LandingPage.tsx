@@ -104,7 +104,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSearchTopic }) => {
             </div>
             <h3 className="font-bold text-neutral-900 text-sm">Find Papers</h3>
             <p className="text-xs text-neutral-500 leading-relaxed">
-              Discover foundational literature and high-impact papers in any field.
+              Search scholarly records and inspect the works OpenAlex retrieves for your topic.
             </p>
           </div>
 

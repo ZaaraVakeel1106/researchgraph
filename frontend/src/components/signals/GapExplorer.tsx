@@ -13,17 +13,19 @@ export const GapExplorer: React.FC<GapExplorerProps> = ({ query }) => {
   const [domainA, setDomainA] = useState('Computer Vision');
   const [domainB, setDomainB] = useState('Healthcare');
   const [loadingCross, setLoadingCross] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    api.fetchResearchGaps(query).then((res) => setSignals(res));
+    api.fetchResearchGaps(query).then((res) => setSignals(res)).catch((err) => setError(err.message || 'Could not load graph statistics.'));
     handleFetchCrossDomain();
   }, [query]);
 
   const handleFetchCrossDomain = () => {
     setLoadingCross(true);
+    setError('');
     api.fetchCrossDomain(domainA, domainB)
       .then((res) => setCrossDomain(res))
-      .catch((err) => console.error(err))
+      .catch((err) => setError(err.message || 'Could not load cross-domain records.'))
       .finally(() => setLoadingCross(false));
   };
 
@@ -33,10 +35,10 @@ export const GapExplorer: React.FC<GapExplorerProps> = ({ query }) => {
       <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm">
         <h2 className="text-lg font-bold text-neutral-900 flex items-center space-x-2">
           <Sparkles className="w-5 h-5 text-amber-500" />
-          <span>Structural Research Gap Signals & Cross-Domain Explorer</span>
+          <span>Graph Structure & Cross-Domain Explorer</span>
         </h2>
         <p className="text-xs text-neutral-500 mt-1">
-          Identifies structurally under-connected areas based on edge density, graph modularity, and betweenness centrality. These are mathematical signals presented for human research investigation.
+          Network structure can describe the retrieved records, but sparse connections alone cannot establish a scientific research gap. No gap claims are generated from this graph.
         </p>
       </div>
 
@@ -47,6 +49,8 @@ export const GapExplorer: React.FC<GapExplorerProps> = ({ query }) => {
           <span>Detected Under-Connected Community Signals</span>
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
+          {!error && signals.length === 0 && <p className="text-sm text-neutral-500">No structural gap signals are shown. Sparse graph connections alone do not establish a scientific research gap.</p>}
           {signals.map((sig) => (
             <div key={sig.id} className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm space-y-3 flex flex-col justify-between">
               <div>

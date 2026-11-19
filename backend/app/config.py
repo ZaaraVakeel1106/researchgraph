@@ -11,6 +11,8 @@ class Settings:
     OPENALEX_MAILTO: str = os.getenv("OPENALEX_MAILTO", "researchgraph@example.com")
     OPENALEX_API_KEY: str = os.getenv("OPENALEX_API_KEY", "")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./researchgraph.db")
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "*"]
+    CORS_ORIGINS: list[str] = [origin.strip() for origin in os.getenv(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
+    ).split(",") if origin.strip()]
 
 settings = Settings()

@@ -1,102 +1,35 @@
-import logging
-from typing import Dict, Any, List, Optional
-from app.services.openalex_service import openalex_service, SEED_WORKS
-from app.services.graph_service import graph_service
+from typing import Any
+from app.services.openalex_service import openalex_service
 
-logger = logging.getLogger("paper_service")
+
+def _citation_item(work: dict) -> dict:
+    return {"id": work.get("id"), "title": work.get("title") or "Not available in the source", "year": work.get("publication_year"),
+            "venue": work.get("venue"), "citation_count": work.get("citation_count"),
+            "authors": [a.get("name") for a in work.get("authors", []) if a.get("name")], "rationale": None,
+            "doi": work.get("doi"), "source_url": work.get("source_url")}
+
 
 class PaperService:
-    def get_paper_study_view(self, paper_id: str) -> Dict[str, Any]:
-        """Generates detailed paper study breakdown, research context, and graph-based read-next signals."""
-        work = openalex_service.get_seed_work_details(paper_id)
-        all_works = {w["id"]: w for w in SEED_WORKS}
+    async def get_paper_study_view(self, paper_id: str) -> dict[str, Any]:
+        work = await openalex_service.get_work(paper_id)
+        refs = await openalex_service.get_works(work.get("referenced_works", [])[:30], 30)
+        citing = await openalex_service.citing_works(work["id"], 20)
+        related = await openalex_service.get_works(work.get("related_works", [])[:15], 15)
+        references = [_citation_item(w) for w in refs]
+        cited_by = [_citation_item(w) for w in citing]
+        related_items = [_citation_item(w) for w in related]
+        unavailable = "Not stated in the available abstract."
+        has_abstract = bool(work.get("abstract"))
+        authors = work.get("authors", [])
+        institutions = list({i["name"]: {"name": i["name"]} for a in authors for i in a.get("institutions", []) if i.get("name")}.values())
+        return {"id": work["id"], "title": work.get("title") or "Not available in the source", "authors": authors,
+                "institutions": institutions, "publication_year": work.get("publication_year"), "publication_date": work.get("publication_date"),
+                "venue": work.get("venue"), "citation_count": work.get("citation_count"), "open_access": work.get("open_access"),
+                "open_access_pdf": work.get("open_access_pdf"), "landing_page": work.get("landing_page"), "doi": work.get("doi"),
+                "source_id": work.get("source_id"), "source_url": work.get("source_url"), "abstract": work.get("abstract"), "topics": work.get("topics", []),
+                "abstract_breakdown": {"problem": unavailable, "methodology": unavailable, "results": unavailable, "limitations": unavailable} if has_abstract else {"problem": unavailable, "methodology": unavailable, "results": unavailable, "limitations": unavailable},
+                "research_context": {"predecessors": references, "current": [{"id": work["id"], "title": work.get("title"), "year": work.get("publication_year")}], "successors": cited_by},
+                "references": references, "cited_by": cited_by, "related_papers": related_items, "recommended_next": []}
 
-        # Abstract breakdown (Problem, Methodology, Results, Limitations)
-        abstract_breakdown = {
-            "problem": f"How to process graph-structured data and relational dependencies while addressing computational scalability and over-smoothing issues in existing deep learning models.",
-            "methodology": f"Leverages masked self-attensional layers and convolutional message passing directly on graph vertices to aggregate node representations from local neighborhoods without global matrix operations.",
-            "results": f"Achieves state-of-the-art results across standard benchmark datasets (Cora, Citeseer, Pubmed) with significant gains in classification accuracy and node classification speed.",
-            "limitations": f"Requires full neighborhood graph retention during training and exhibits increased memory overhead when scaling to billions of dynamic graph edges without sub-sampling."
-        }
-
-        # References (Papers cited by this paper)
-        references = [
-            {
-                "id": c_id,
-                "title": all_works[c_id]["title"],
-                "year": all_works[c_id]["publication_year"],
-                "venue": all_works[c_id]["venue"],
-                "citation_count": all_works[c_id]["cited_by_count"],
-                "authors": [a["name"] for a in all_works[c_id].get("authors", [])],
-                "rationale": "Foundational predecessor paper cited in methodology formulation."
-            }
-            for c_id in work.get("citations", []) if c_id in all_works
-        ]
-
-        # Cited By (Papers citing this paper)
-        cited_by = [
-            {
-                "id": cb_id,
-                "title": all_works[cb_id]["title"],
-                "year": all_works[cb_id]["publication_year"],
-                "venue": all_works[cb_id]["venue"],
-                "citation_count": all_works[cb_id]["cited_by_count"],
-                "authors": [a["name"] for a in all_works[cb_id].get("authors", [])],
-                "rationale": "Subsequent research extending attention mechanisms to new domains."
-            }
-            for cb_id in work.get("cited_by", []) if cb_id in all_works
-        ]
-
-        # Research Context (Predecessors, Target, Successors)
-        predecessors = [
-            {"id": c["id"], "title": c["title"], "year": c["year"], "venue": c["venue"]}
-            for c in references
-        ]
-        
-        successors = [
-            {"id": cb["id"], "title": cb["title"], "year": cb["year"], "venue": cb["venue"]}
-            for cb in cited_by
-        ]
-
-        # Connected / Related papers with explicit "Why am I seeing this?" rationale
-        related = []
-        for w in SEED_WORKS:
-            if w["id"] != paper_id:
-                related.append({
-                    "id": w["id"],
-                    "title": w["title"],
-                    "year": w["publication_year"],
-                    "venue": w["venue"],
-                    "citations": w["cited_by_count"],
-                    "authors": [a["name"] for a in w.get("authors", [])],
-                    "graph_rationale": f"Surfaced via PageRank influence (0.185) within the same detected Louvain research community ({work['topics'][0] if work.get('topics') else 'GNN'})."
-                })
-
-        # Local graph neighborhood
-        local_graph = graph_service.build_graph_for_topic(mode="landscape")
-
-        return {
-            "id": work["id"],
-            "title": work["title"],
-            "authors": work.get("authors", []),
-            "institutions": [{"name": a.get("institution", "University")} for a in work.get("authors", [])],
-            "publication_year": work["publication_year"],
-            "venue": work.get("venue", "Conference Proceedings"),
-            "citation_count": work["cited_by_count"],
-            "open_access_pdf": work.get("doi"),
-            "doi": work.get("doi"),
-            "abstract": work.get("abstract", "Abstract text unavailable."),
-            "abstract_breakdown": abstract_breakdown,
-            "research_context": {
-                "predecessors": predecessors,
-                "current": [{"id": work["id"], "title": work["title"], "year": work["publication_year"]}],
-                "successors": successors
-            },
-            "references": references,
-            "cited_by": cited_by,
-            "related_papers": related,
-            "recommended_next": related[:3],
-            "local_graph": local_graph
-        }
 
 paper_service = PaperService()

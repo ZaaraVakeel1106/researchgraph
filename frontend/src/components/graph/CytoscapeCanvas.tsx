@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import cytoscape, { Core, EventObject } from 'cytoscape';
 import { ResearchGraphData, GraphNode, RelevanceTier } from '../../types';
-import { Layers, Sliders } from 'lucide-react';
 
 interface CytoscapeCanvasProps {
   graphData: ResearchGraphData;
@@ -21,29 +20,17 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
 
-  // Scope Filter State: 'core' | 'related' | 'all'
-  const [scopeFilter, setScopeFilter] = useState<'core' | 'related' | 'all'>('related');
-
   useEffect(() => {
     if (!containerRef.current || !graphData || !graphData.nodes) return;
 
-    // Filter nodes by year range AND selected scope filter
+    // Scope selection is applied by the API. Keep the layout intact for timeline filtering.
     const cyNodes = graphData.nodes
-      .filter((n) => {
-        const yearOk = !n.year || (n.year >= yearRange[0] && n.year <= yearRange[1]);
-        if (!yearOk) return false;
-
-        const tier = n.relevance_tier || 'core';
-        if (scopeFilter === 'core') return tier === 'core';
-        if (scopeFilter === 'related') return tier === 'core' || tier === 'related';
-        return true; // 'all' includes adjacent
-      })
       .map((n) => {
         const pr = n.metrics?.pagerank || 0.01;
         const size = Math.max(34, Math.min(75, 34 + pr * 300));
         
         let color = '#0f766e'; // paper
-        let shape = 'ellipse';
+        let shape = 'round-rectangle';
         if (n.type === 'author') { color = '#d97706'; shape = 'ellipse'; }
         else if (n.type === 'institution') { color = '#4338ca'; shape = 'round-rectangle'; }
         else if (n.type === 'topic') { color = '#e11d48'; shape = 'hexagon'; }
@@ -64,6 +51,7 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
           borderStyle = 'dashed';
         }
 
+        const priorNode = cyRef.current?.getElementById(n.id);
         return {
           data: {
             id: n.id,
@@ -77,7 +65,8 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
             borderWidth: borderWidth,
             borderStyle: borderStyle,
             rawNode: n
-          }
+          },
+          ...(priorNode && !priorNode.empty() ? { position: priorNode.position() } : {})
         };
       });
 
@@ -150,6 +139,13 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
             'overlay-padding': 8
           }
         },
+        { selector: 'edge[type = "cites"]', style: { 'line-color': '#0f766e', 'target-arrow-color': '#0f766e' } },
+        { selector: 'edge[type = "authored"]', style: { 'line-color': '#d97706', 'target-arrow-shape': 'none', 'line-style': 'dashed' } },
+        { selector: 'edge[type = "affiliated_with"]', style: { 'line-color': '#6366f1', 'target-arrow-shape': 'none', 'line-style': 'dotted' } },
+        { selector: 'edge[type = "has_topic"]', style: { 'line-color': '#e11d48', 'target-arrow-shape': 'none', 'line-style': 'dashed' } },
+        { selector: 'edge[type = "related_work"]', style: { 'line-color': '#64748b', 'target-arrow-shape': 'none', 'line-style': 'dotted' } },
+        { selector: 'edge[type = "collaborates_with"]', style: { 'line-color': '#d97706', 'target-arrow-shape': 'none', 'line-style': 'dashed' } },
+        { selector: 'edge[type = "topic_association"]', style: { 'line-color': '#e11d48', 'target-arrow-shape': 'none', 'line-style': 'dotted' } },
         {
           selector: '.highlighted',
           style: {
@@ -176,6 +172,7 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
       layout: {
         name: 'cose',
         animate: false,
+        randomize: false,
         nodeRepulsion: 400000,
         idealEdgeLength: 100,
         edgeElasticity: 100,
@@ -222,7 +219,37 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
         cyRef.current.destroy();
       }
     };
-  }, [graphData, yearRange, scopeFilter]);
+  }, [graphData]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    const hiddenPapers = new Set(cy.nodes().filter(n => n.data('type') === 'paper' && n.data('rawNode').year &&
+      (n.data('rawNode').year < yearRange[0] || n.data('rawNode').year > yearRange[1])).map(n => n.id()));
+    cy.batch(() => {
+      cy.nodes().forEach(node => {
+        const raw = node.data('rawNode') as GraphNode;
+        const outsideYear = raw.type === 'paper' && raw.year !== undefined && (raw.year < yearRange[0] || raw.year > yearRange[1]);
+        const nearbyPapers = node.neighborhood().union(node.neighborhood().neighborhood()).filter('node[type = "paper"]');
+        const nearbyPaperIds = nearbyPapers.toArray().map((paper) => paper.id());
+        const noVisiblePaper = raw.type !== 'paper' && (nearbyPaperIds.length === 0 || nearbyPaperIds.every((id) => hiddenPapers.has(id)));
+        node.style('display', outsideYear || noVisiblePaper ? 'none' : 'element');
+      });
+      cy.edges().forEach(edge => { edge.style('display', hiddenPapers.has(edge.source().id()) || hiddenPapers.has(edge.target().id()) ? 'none' : 'element'); });
+    });
+  }, [yearRange, graphData]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.elements().removeClass('dimmed').removeClass('highlighted').removeClass('edge-highlighted');
+    if (!selectedNodeId) return;
+    const selected = cy.getElementById(selectedNodeId);
+    if (selected.empty()) return;
+    cy.elements().addClass('dimmed');
+    selected.closedNeighborhood().removeClass('dimmed').addClass('highlighted');
+    selected.connectedEdges().removeClass('dimmed').addClass('edge-highlighted');
+  }, [selectedNodeId]);
 
   // Filter in graph search term
   useEffect(() => {
@@ -253,33 +280,6 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
     <div className="relative w-full h-full min-h-[550px] overflow-hidden bg-neutral-50 rounded-2xl border border-neutral-200 shadow-inner">
       <div ref={containerRef} className="cy-container" />
 
-      {/* Scope Filter Toolbar directly on canvas */}
-      <div className="absolute top-4 right-4 z-10 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-xl border border-neutral-200 shadow-sm flex items-center space-x-2 text-xs">
-        <span className="text-neutral-400 font-medium text-[11px] flex items-center space-x-1">
-          <Layers className="w-3.5 h-3.5" />
-          <span>Research Scope:</span>
-        </span>
-        <div className="flex items-center space-x-1 bg-neutral-100 p-1 rounded-lg">
-          {[
-            { id: 'core', label: '🟢 Core Only' },
-            { id: 'related', label: '🔵 Core + Related' },
-            { id: 'all', label: 'Explore Full Network' }
-          ].map((scope) => (
-            <button
-              key={scope.id}
-              onClick={() => setScopeFilter(scope.id as any)}
-              className={`px-2.5 py-1 rounded-md font-semibold transition ${
-                scopeFilter === scope.id
-                  ? 'bg-white text-academic-900 shadow-xs'
-                  : 'text-neutral-600 hover:text-neutral-900'
-              }`}
-            >
-              {scope.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Canvas Floating Controls */}
       <div className="absolute bottom-4 left-4 z-10 flex flex-col space-y-1 bg-white/95 backdrop-blur-md p-1.5 rounded-xl border border-neutral-200 shadow-sm text-neutral-700">
         <button
@@ -308,6 +308,7 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
       {/* Floating Legend */}
       <div className="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur-md px-3 py-2 rounded-xl border border-neutral-200 shadow-sm text-xs space-y-1 text-neutral-700">
         <div className="font-semibold text-[11px] text-neutral-500 uppercase tracking-wider mb-1">Graph Legend</div>
+        <div className="text-[10px] text-neutral-500">Citation arrow: citing paper → referenced paper</div>
         <div className="flex items-center space-x-2">
           <span className="w-2.5 h-2.5 rounded-full bg-paper" />
           <span>Paper</span>
@@ -324,6 +325,7 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
           <span className="w-2.5 h-2.5 rounded-full bg-topic" />
           <span>Topic</span>
         </div>
+        <div className="border-t pt-1 text-[10px] text-neutral-500">Teal arrows cite; amber links show authorship; blue links show affiliation; rose links show topics.</div>
       </div>
     </div>
   );

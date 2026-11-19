@@ -1,31 +1,16 @@
-# RESEARCHGRAPH — Architecture Document
-
-## System Architecture
+# ResearchGraph architecture
 
 ```mermaid
 graph TD
-    Client[React + TypeScript + Cytoscape.js Frontend] -->|REST API Requests| FastAPI[FastAPI Backend Server]
-    FastAPI --> OpenAlexService[OpenAlex Service]
-    FastAPI --> GraphEngine[NetworkX Graph Engine]
-    FastAPI --> DB[(SQLite / PostgreSQL Cache & Workspace DB)]
-
-    OpenAlexService -->|HTTPS Requests & Mailto Header| OpenAlex[OpenAlex API Endpoint]
-    OpenAlexService -->|Seed Fallback Cache| DB
-
-    GraphEngine -->|Calculates PageRank, Centrality & Louvain| Metrics[Graph Metrics Engine]
-    GraphEngine -->|Dijkstra Pathfinding| ShortestPath[Pathfinder]
+    Browser[React + Cytoscape] -->|query and scope| API[FastAPI]
+    API --> Search[OpenAlex client]
+    Search -->|normalized records| Graph[NetworkX graph service]
+    Search -->|selected work and relationships| Study[Paper study service]
+    API --> Workspace[SQLite notes and bookmarks]
+    Graph --> Browser
+    Study --> Browser
 ```
 
-## Data Model
+OpenAlex is the scholarly source. Works retain their OpenAlex ID and source URL. Graph expansion is bounded, deduplicated, and uses only retrieved records. A citation `A → B` means that work A lists work B in `referenced_works`. Authorship, affiliation, topic, and related-work edges remain separate relationship types.
 
-- **Nodes ($V$)**:
-  - `Paper`: Title, Year, Venue, Citation Count, DOI.
-  - `Author`: Name, Affiliated Institution, Citation Influence.
-  - `Institution`: Display Name, Country.
-  - `Topic`: Field name, Sub-topics.
-- **Edges ($E$)**:
-  - `cites`: Directed arc $P_1 \rightarrow P_2$.
-  - `authored`: Directed arc $A_1 \rightarrow P_1$.
-  - `affiliated_with`: Directed arc $A_1 \rightarrow I_1$.
-  - `has_topic`: Directed arc $P_1 \rightarrow T_1$.
-  - `collaborates_with`: Undirected edge $A_1 \leftrightarrow A_2$ with co-authorship weights.
+SQLite stores personal notes and bookmarks in `backend/researchgraph.db`. External records are fetched from OpenAlex; network errors are returned to the UI and do not switch to sample records. Network measures are calculated over the currently retrieved graph and do not indicate scientific quality.

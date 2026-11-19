@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Header } from '../components/common/Header';
 import { CytoscapeCanvas } from '../components/graph/CytoscapeCanvas';
 import { NodeDetailsPanel } from '../components/details/NodeDetailsPanel';
@@ -19,6 +19,8 @@ interface ResearchWorkspaceProps {
 export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQuery, onBackToHome }) => {
   const [query, setQuery] = useState(initialQuery);
   const [graphMode, setGraphMode] = useState('landscape');
+  const [scope, setScope] = useState('core');
+  const [centerNodeId, setCenterNodeId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'canvas' | 'insights' | 'connections'>('overview');
   
   const [graphData, setGraphData] = useState<ResearchGraphData | null>(null);
@@ -26,6 +28,11 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [yearRange, setYearRange] = useState<[number, number]>([2015, 2026]);
   const [graphSearchTerm, setGraphSearchTerm] = useState('');
+  const [graphError, setGraphError] = useState('');
+  const graphRequestId = useRef(0);
+  const years = (graphData?.nodes || []).filter((node) => node.type === 'paper' && node.year).map((node) => node.year as number);
+  const minYear = years.length ? Math.min(...years) : 1900;
+  const maxYear = years.length ? Math.max(...years) : new Date().getFullYear();
 
   // Modals
   const [studyPaperId, setStudyPaperId] = useState<string | null>(null);
@@ -33,18 +40,25 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
   const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
-    loadGraph(query, graphMode);
-  }, [query, graphMode]);
+    loadGraph(query, graphMode, scope, centerNodeId);
+  }, [query, graphMode, scope, centerNodeId]);
 
-  const loadGraph = (q: string, mode: string) => {
+  useEffect(() => {
+    if (years.length) setYearRange([minYear, maxYear]);
+  }, [graphData]);
+
+  const loadGraph = (q: string, mode: string, graphScope = scope, centeredId = centerNodeId) => {
+    const requestId = ++graphRequestId.current;
     setLoadingGraph(true);
-    api.fetchGraphLandscape(q, mode)
+    setGraphError('');
+    (centeredId ? api.fetchGraphEntity(centeredId, graphScope) : api.fetchGraphLandscape(q, mode, graphScope))
       .then((data) => {
+        if (requestId !== graphRequestId.current) return;
         setGraphData(data);
         setSelectedNode(null);
       })
-      .catch((err) => console.error(err))
-      .finally(() => setLoadingGraph(false));
+      .catch((err) => { if (requestId === graphRequestId.current) { setGraphData(null); setGraphError(err.message || 'Could not retrieve research data.'); } })
+      .finally(() => { if (requestId === graphRequestId.current) setLoadingGraph(false); });
   };
 
   const handleAddBookmark = async (node: GraphNode) => {
@@ -53,11 +67,12 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
         entity_id: node.id,
         entity_type: node.type,
         title: node.label,
-        subtitle: node.sub_label || ''
+        subtitle: node.sub_label || '',
+        metadata_json: { year: node.year, venue: node.data?.venue, doi: node.data?.doi, authors: node.data?.authors, source_url: node.data?.source_url }
       });
-      alert(`Saved "${node.label}" to your literature workspace!`);
+      alert(`Saved "${node.label}" to your literature workspace.`);
     } catch (err) {
-      console.error(err);
+      alert(err instanceof Error ? err.message : 'Could not save bookmark.');
     }
   };
 
@@ -66,8 +81,8 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
   };
 
   const handleRecenterGraph = (nodeId: string, nodeLabel: string) => {
+    setCenterNodeId(nodeId);
     setQuery(nodeLabel);
-    loadGraph(nodeLabel, graphMode);
     setActiveTab('canvas');
   };
 
@@ -76,7 +91,7 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
       {/* Top Bar Header */}
       <Header
         query={query}
-        onSearch={(q) => { setQuery(q); setActiveTab('overview'); }}
+        onSearch={(q) => { setCenterNodeId(null); setQuery(q); setActiveTab('overview'); }}
         activeTab={activeTab}
         onSelectTab={(t) => setActiveTab(t)}
         onOpenWorkspace={() => setShowWorkspace(true)}
@@ -158,12 +173,15 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
               </div>
               <input
                 type="range"
-                min="2015"
-                max="2026"
+                min={minYear}
+                max={maxYear}
                 value={yearRange[0]}
-                onChange={(e) => setYearRange([parseInt(e.target.value), yearRange[1]])}
+                onChange={(e) => setYearRange([Math.min(parseInt(e.target.value), yearRange[1]), yearRange[1]])}
                 className="w-full accent-academic-900"
               />
+              <input type="range" min={minYear} max={maxYear} value={yearRange[1]}
+                onChange={(e) => setYearRange([yearRange[0], Math.max(parseInt(e.target.value), yearRange[0])])}
+                className="w-full accent-academic-900" />
             </div>
           </div>
         </aside>
@@ -179,9 +197,7 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
                   <h1 className="text-2xl font-extrabold text-neutral-900 uppercase tracking-tight">{query}</h1>
                   {graphData?.stats && (
                     <div className="flex items-center space-x-3 text-xs font-mono text-neutral-500 bg-neutral-50 px-3 py-1.5 rounded-lg border border-neutral-200">
-                      <span>🟢 {graphData.stats.core_count || 5} Core</span> • 
-                      <span>🔵 {graphData.stats.related_count || 6} Related</span> • 
-                      <span>🟠 {graphData.stats.adjacent_count || 4} Adjacent</span>
+                      <span>{graphData.stats.paper_count} papers</span> • <span>{graphData.stats.total_nodes} entities</span>
                     </div>
                   )}
                 </div>
@@ -202,7 +218,7 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
                       <BookOpen className="w-4 h-4" />
                     </div>
                     <h4 className="font-bold text-neutral-900 text-sm">📚 Find Papers</h4>
-                    <p className="text-xs text-neutral-500 leading-relaxed">Discover foundational literature and high-impact works.</p>
+                    <p className="text-xs text-neutral-500 leading-relaxed">Open scholarly works retrieved from this topic.</p>
                   </div>
 
                   <div
@@ -217,7 +233,7 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
                   </div>
 
                   <div
-                    onClick={() => setStudyPaperId('W2741809807')}
+                    onClick={() => setActiveTab('canvas')}
                     className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-xs hover:border-academic-900 transition cursor-pointer space-y-2"
                   >
                     <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-800 flex items-center justify-center">
@@ -259,6 +275,10 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
                   </span>
                 </div>
                 <div className="flex items-center space-x-2 text-xs">
+                  <label className="text-neutral-600">Scope</label>
+                  <select value={scope} onChange={(e) => setScope(e.target.value)} className="bg-white px-2 py-1 rounded border border-neutral-200 text-xs">
+                    <option value="core">Core Only</option><option value="related">Core + Related</option><option value="full">Explore Full Network</option>
+                  </select>
                   <Search className="w-3.5 h-3.5 text-neutral-400" />
                   <input
                     type="text"
@@ -285,11 +305,12 @@ export const ResearchWorkspace: React.FC<ResearchWorkspaceProps> = ({ initialQue
                     yearRange={yearRange}
                     searchTerm={graphSearchTerm}
                   />
-                ) : null}
+                ) : <div className="h-full bg-white rounded-xl border border-rose-200 p-6 text-sm text-rose-800">{graphError || 'No research records were found.'}<button onClick={() => loadGraph(query, graphMode, scope)} className="ml-3 underline">Retry</button></div>}
 
                 {/* Right Slide-over Context Panel */}
                 <NodeDetailsPanel
                   node={selectedNode}
+                  edges={graphData?.edges}
                   onClose={() => setSelectedNode(null)}
                   onOpenPaperStudy={(pid) => setStudyPaperId(pid)}
                   onAddBookmark={handleAddBookmark}
