@@ -1,5 +1,7 @@
 from typing import Any
+from app.config import settings
 from app.services.openalex_service import openalex_service
+from app.services.ttl_cache import TTLCache
 
 
 def _citation_item(work: dict) -> dict:
@@ -10,7 +12,18 @@ def _citation_item(work: dict) -> dict:
 
 
 class PaperService:
+    def __init__(self):
+        self._study_cache = TTLCache(max_entries=512)
+
     async def get_paper_study_view(self, paper_id: str) -> dict[str, Any]:
+        cached = self._study_cache.get(paper_id)
+        if cached is not None:
+            return cached
+        result = await self._build_paper_study_view(paper_id)
+        self._study_cache.set(paper_id, result, settings.OPENALEX_PAPER_STUDY_CACHE_TTL)
+        return result
+
+    async def _build_paper_study_view(self, paper_id: str) -> dict[str, Any]:
         work = await openalex_service.get_work(paper_id)
         refs = await openalex_service.get_works(work.get("referenced_works", [])[:30], 30)
         citing = await openalex_service.citing_works(work["id"], 20)

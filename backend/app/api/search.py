@@ -9,13 +9,16 @@ router = APIRouter(prefix="/api", tags=["Search"])
 async def search(
     q: str = Query(..., description="Search query string"),
     entity_type: Literal["works", "authors", "topics", "institutions"] = Query("works", description="Entity type"),
-    limit: int = Query(15, ge=1, le=50),
-    page: int = Query(1, ge=1, le=1000)
+    limit: int = Query(15, ge=1, le=100),
+    page: int = Query(1, ge=1, le=1000),
+    cursor: str | None = Query(None, description="OpenAlex cursor for progressive pagination")
 ):
-    results_raw = await openalex_service.search(query=q, entity_type=entity_type, limit=limit, page=page)
-    items = [SearchResultItem(**item) for item in results_raw]
+    page_data = await openalex_service.search_page(query=q, entity_type=entity_type, limit=limit, page=page, cursor=cursor)
+    items = [SearchResultItem(**item) for item in page_data["results"]]
     return SearchResponse(
         query=q,
         total_results=len(items),
-        results=items
+        results=items,
+        provider_total=page_data.get("provider_total"),
+        next_cursor=page_data.get("next_cursor")
     )

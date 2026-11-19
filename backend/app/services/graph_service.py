@@ -1,12 +1,27 @@
 """Build bounded graphs only from records and relationships returned by OpenAlex."""
+import json
 from typing import Any
 import networkx as nx
 
+from app.config import settings
 from app.services.openalex_service import openalex_service
+from app.services.ttl_cache import TTLCache
 
 
 class GraphService:
+    def __init__(self):
+        self._graph_cache = TTLCache(max_entries=256)
+
     async def build_graph_for_topic(self, topic_query: str, mode: str = "landscape", scope: str = "core", center_node_id: str | None = None, limit: int = 15, hops: int = 2) -> dict[str, Any]:
+        key = json.dumps([topic_query, mode, scope, center_node_id, limit, hops], separators=(",", ":"))
+        cached = self._graph_cache.get(key)
+        if cached is not None:
+            return cached
+        result = await self._build_graph_for_topic(topic_query, mode, scope, center_node_id, limit, hops)
+        self._graph_cache.set(key, result, settings.OPENALEX_GRAPH_CACHE_TTL)
+        return result
+
+    async def _build_graph_for_topic(self, topic_query: str, mode: str = "landscape", scope: str = "core", center_node_id: str | None = None, limit: int = 15, hops: int = 2) -> dict[str, Any]:
         if center_node_id:
             center_work = await openalex_service.get_work(center_node_id)
             core_ids = [center_work["id"]]

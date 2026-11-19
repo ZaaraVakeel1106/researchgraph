@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { LandingPage } from './pages/LandingPage';
 import { ResearchWorkspace } from './pages/ResearchWorkspace';
+import { ToastProvider } from './components/common/ToastProvider';
 
 export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'landing' | 'workspace'>('landing');
@@ -11,8 +12,8 @@ export const App: React.FC = () => {
     setCurrentView('workspace');
   };
 
-  return (
-    <div className="w-full h-full min-h-screen bg-[#fafafa]">
+  return <ToastProvider><>
+    <div className="rg-app w-full h-full min-h-screen">
       {currentView === 'landing' ? (
         <LandingPage onSearchTopic={handleStartSearch} />
       ) : (
@@ -22,7 +23,7 @@ export const App: React.FC = () => {
         />
       )}
     </div>
-  );
+  </></ToastProvider>;
 };
 
 export default App;

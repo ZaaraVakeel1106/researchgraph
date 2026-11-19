@@ -77,6 +77,26 @@ def test_openalex_failure_is_error_not_seed():
     assert "SEED_WORKS" not in vars(service)
 
 
+def test_search_api_returns_provider_total_and_cursor(workspace_client, monkeypatch):
+    async def search_page(query, entity_type, limit, page, cursor):
+        assert query == "climate change"
+        assert entity_type == "works" and limit == 25
+        assert cursor == "*"
+        return {
+            "results": [{"id": "W1", "type": "paper", "title": "Climate adaptation study", "year": 2022}],
+            "provider_total": 1234,
+            "next_cursor": "cursor-page-2",
+        }
+    monkeypatch.setattr("app.api.search.openalex_service.search_page", search_page)
+    response = workspace_client.get("/api/search?q=climate%20change&entity_type=works&limit=25&cursor=*")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_results"] == 1
+    assert payload["provider_total"] == 1234
+    assert payload["next_cursor"] == "cursor-page-2"
+    assert payload["results"][0]["id"] == "W1"
+
+
 def test_abstract_reconstruction_and_missing_abstract():
     record = {**RECORDS["W1"]}
     assert normalize_work(record)["abstract"] == "Climate adaptation"

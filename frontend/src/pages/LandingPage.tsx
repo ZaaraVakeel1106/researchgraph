@@ -1,138 +1,104 @@
-import React, { useState } from 'react';
-import { Search, Network, ArrowRight, Compass, BookOpen, Users, GitBranch } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Search, Network, ArrowUpRight, BookOpen, Bookmark, GitBranch, Sparkles } from 'lucide-react';
 
-interface LandingPageProps {
-  onSearchTopic: (query: string) => void;
-}
+interface LandingPageProps { onSearchTopic: (query: string) => void; }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onSearchTopic }) => {
   const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const examples = ['Climate change', 'Psychological thinking', 'Computer vision', 'Medical image segmentation'];
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (query.trim()) {
-      onSearchTopic(query.trim());
-    }
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (query.trim()) onSearchTopic(query.trim());
   };
 
-  const sampleQueries = [
-    'Graph Neural Networks',
-    'Attention Is All You Need',
-    'Federated Learning',
-    'Large Language Models',
-    'Computer Vision'
-  ];
-
   return (
-    <div className="min-h-screen bg-[#fafafa] text-neutral-900 flex flex-col font-sans">
-      {/* Top Bar */}
-      <nav className="h-20 px-8 flex items-center justify-between border-b border-neutral-200/80 bg-white/70 backdrop-blur-md sticky top-0 z-30">
-        <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-xl bg-academic-900 flex items-center justify-center text-white shadow-sm">
-            <Network className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="font-bold text-lg tracking-tight text-neutral-900">RESEARCHGRAPH</span>
-            <span className="block text-[10px] uppercase tracking-widest text-neutral-400 font-semibold -mt-1">
-              RESEARCH DISCOVERY
-            </span>
-          </div>
+    <div className="rg-app min-h-screen flex flex-col overflow-hidden">
+      <header className="h-[76px] shrink-0 border-b border-neutral-200/80 px-6 md:px-10 flex items-center justify-between bg-sidebar/90">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-sage-900/15 border border-sage-900/30 text-sage-900 flex items-center justify-center"><Network className="w-[18px] h-[18px]" /></div>
+          <div><div className="text-[13px] font-semibold tracking-[.14em]">RESEARCHGRAPH</div><div className="rg-kicker mt-0.5">Scholarly discovery studio</div></div>
         </div>
+        <button onClick={() => inputRef.current?.focus()} className="hidden sm:inline-flex items-center gap-2 text-xs text-neutral-500 hover:text-neutral-900 transition">
+          Explore the literature <ArrowUpRight className="w-3.5 h-3.5" />
+        </button>
+      </header>
 
-        <div className="flex items-center space-x-4 text-xs font-medium">
-          <button
-            onClick={() => onSearchTopic('Graph Neural Networks')}
-            className="px-4 py-2 bg-academic-900 hover:bg-academic-800 text-white rounded-xl transition shadow-sm font-semibold"
-          >
-            Explore Research
-          </button>
-        </div>
-      </nav>
-
-      {/* Hero Section */}
-      <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-20 flex flex-col items-center text-center space-y-8">
-        {/* Title */}
-        <div className="space-y-3">
-          <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-neutral-900 leading-tight">
-            Understand research, <br className="hidden sm:inline" /> not just papers.
-          </h1>
-          <p className="text-base text-neutral-600 font-normal leading-relaxed max-w-xl mx-auto">
-            Explore research fields as a connected network. Trace citations, discover influential researchers, and uncover emerging connections.
-          </p>
-        </div>
-
-        {/* Clean, Inviting Search Box */}
-        <form onSubmit={handleSubmit} className="w-full max-w-2xl pt-2">
-          <div className="relative flex items-center bg-white p-2 rounded-2xl border border-neutral-300 shadow-xl hover:border-academic-900 transition">
-            <Search className="w-5 h-5 absolute left-4 text-neutral-400" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="What are you researching?"
-              className="w-full pl-12 pr-36 py-4 text-base text-neutral-900 bg-transparent focus:outline-none placeholder:text-neutral-400 font-medium"
-            />
-            <button
-              type="submit"
-              className="absolute right-2.5 px-6 py-3 bg-academic-900 hover:bg-academic-800 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center space-x-2"
-            >
-              <span>Explore Research</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </form>
-
-        {/* Try Chips */}
-        <div className="flex flex-wrap items-center justify-center gap-2 text-xs pt-1">
-          <span className="text-neutral-400 font-medium">Try:</span>
-          {sampleQueries.map((sq, idx) => (
-            <button
-              key={idx}
-              onClick={() => onSearchTopic(sq)}
-              className="px-3 py-1.5 bg-white hover:bg-neutral-100 border border-neutral-200 text-neutral-700 rounded-lg font-medium transition shadow-xs"
-            >
-              {sq}
-            </button>
-          ))}
-        </div>
-
-        {/* Task Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 w-full text-left pt-12">
-          <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-xs space-y-2 hover:border-academic-900 transition cursor-pointer" onClick={() => onSearchTopic('Graph Neural Networks')}>
-            <div className="w-10 h-10 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-800">
-              <BookOpen className="w-5 h-5" />
+      <main className="flex-1 w-full max-w-[1320px] mx-auto px-6 md:px-10 py-12 md:py-[76px]">
+        <div className="grid lg:grid-cols-[1.1fr_.9fr] gap-12 lg:gap-20 items-center">
+          <section className="max-w-[710px]">
+            <div className="inline-flex items-center gap-2 text-[10px] tracking-[.14em] uppercase font-semibold text-sage-900 px-3 py-1.5 rounded-full border border-sage-900/25 bg-sage-900/10">
+              <span className="w-1.5 h-1.5 rounded-full bg-sage-900" /> A connected view of research
             </div>
-            <h3 className="font-bold text-neutral-900 text-sm">Find Papers</h3>
-            <p className="text-xs text-neutral-500 leading-relaxed">
-              Search scholarly records and inspect the works OpenAlex retrieves for your topic.
+            <h1 className="font-editorial text-[52px] sm:text-[68px] leading-[.99] tracking-[-.035em] mt-7 max-w-[680px]">
+              Follow the ideas<br className="hidden sm:block" /> behind the paper.
+            </h1>
+            <p className="text-[15px] text-neutral-600 leading-7 mt-6 max-w-[570px]">
+              Search scholarly work, trace its references, and explore the people and topics connected to it. Every record comes from OpenAlex.
             </p>
-          </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-xs space-y-2 hover:border-academic-900 transition cursor-pointer" onClick={() => onSearchTopic('Graph Neural Networks')}>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-800">
-              <GitBranch className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-neutral-900 text-sm">Trace Ideas</h3>
-            <p className="text-xs text-neutral-500 leading-relaxed">
-              Follow citation chains to see what a paper built on and what came after it.
-            </p>
-          </div>
+            <form onSubmit={submit} className="mt-9 max-w-[650px]">
+              <label htmlFor="research-query" className="rg-kicker block mb-2.5">Start with a topic, question, or paper title</label>
+              <div className="flex gap-2 p-2 rounded-2xl bg-neutral-50 border border-neutral-200 focus-within:border-sage-900/60 focus-within:ring-2 focus-within:ring-sage-900/15 transition">
+                <div className="flex flex-1 min-w-0 items-center gap-3 pl-3">
+                  <Search className="w-[18px] h-[18px] text-neutral-500 shrink-0" />
+                  <input ref={inputRef} id="research-query" value={query} onChange={e => setQuery(e.target.value)}
+                    placeholder="e.g. climate adaptation policy" className="w-full min-w-0 py-3 bg-transparent text-sm text-neutral-900 placeholder:text-neutral-500 outline-none" />
+                </div>
+                <button type="submit" disabled={!query.trim()} className="shrink-0 inline-flex items-center gap-2 px-4 sm:px-5 py-3 rounded-xl bg-highlight-500 text-neutral-900 font-semibold text-xs hover:bg-highlight-600 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                  Explore <ArrowUpRight className="w-4 h-4" />
+                </button>
+              </div>
+            </form>
 
-          <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-xs space-y-2 hover:border-academic-900 transition cursor-pointer" onClick={() => onSearchTopic('Graph Neural Networks')}>
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-800">
-              <Users className="w-5 h-5" />
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-neutral-500 mr-1">Try a search</span>
+              {examples.map(example => <button key={example} onClick={() => onSearchTopic(example)} className="px-3 py-1.5 rounded-full border border-neutral-200 text-[11px] text-neutral-600 hover:text-neutral-900 hover:border-sage-900/40 hover:bg-neutral-50 transition">{example}</button>)}
             </div>
-            <h3 className="font-bold text-neutral-900 text-sm">Explore Researchers</h3>
-            <p className="text-xs text-neutral-500 leading-relaxed">
-              Discover active authors, institutions, and collaboration networks.
-            </p>
+          </section>
+
+          <div className="relative hidden lg:block min-h-[410px]">
+            <div className="rg-hero-surface absolute inset-0 rounded-[28px] border border-neutral-200/70 overflow-hidden">
+              <div className="absolute left-8 top-8 rg-kicker">A literature map</div>
+              <div className="absolute right-8 top-8 text-[10px] tracking-[.12em] uppercase text-neutral-500">Papers · people · ideas</div>
+              <svg viewBox="0 0 540 390" className="absolute inset-0 w-full h-full" aria-hidden="true">
+                <defs><linearGradient id="rg-edge" x1="0" x2="1"><stop stopColor="var(--rg-sage)" stopOpacity=".18"/><stop offset=".5" stopColor="var(--rg-blue)" stopOpacity=".56"/><stop offset="1" stopColor="var(--rg-sage)" stopOpacity=".2"/></linearGradient></defs>
+                <g stroke="url(#rg-edge)" strokeWidth="1.2" fill="none">
+                  <path d="M102 202 197 124 284 174 383 104 444 188 347 266 252 236 164 300 102 202Z"/>
+                  <path d="m197 124 55 112 31-62 64 92 97-78-160-62-120 176 186-162"/>
+                  <path d="m102 202 150 34 131-132 61 84-97 78-183 34"/>
+                </g>
+                <g stroke="var(--rg-secondary)" strokeWidth="1.4">
+                  <circle cx="102" cy="202" r="8" fill="var(--rg-blue)"/><circle cx="197" cy="124" r="6" fill="var(--rg-amber)"/><circle cx="284" cy="174" r="13" fill="var(--rg-sage)"/><circle cx="383" cy="104" r="7" fill="var(--rg-coral)"/><circle cx="444" cy="188" r="9" fill="var(--rg-blue)"/><circle cx="347" cy="266" r="7" fill="var(--rg-amber)"/><circle cx="252" cy="236" r="6" fill="var(--rg-sage)"/><circle cx="164" cy="300" r="8" fill="var(--rg-coral)"/>
+                </g>
+                <circle cx="284" cy="174" r="23" fill="none" stroke="var(--rg-lime)" strokeOpacity=".65"/>
+              </svg>
+              <div className="absolute bottom-7 left-7 right-7 flex items-end justify-between border-t border-neutral-200/70 pt-4">
+                <div><div className="text-sm font-medium">Connections with provenance</div><div className="text-xs text-neutral-500 mt-1">Follow each relationship back to its source record.</div></div>
+                <span className="font-editorial text-4xl text-sage-900/80">R/G</span>
+              </div>
+            </div>
           </div>
         </div>
+
+        <section className="mt-16 md:mt-24 border-t border-neutral-200/80 pt-7">
+          <div className="flex items-baseline justify-between gap-4 mb-5"><h2 className="font-editorial text-2xl">A quieter way to explore a field</h2><span className="rg-kicker hidden sm:inline">Research tools, grounded in records</span></div>
+          <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-neutral-200/80 border-y border-neutral-200/80">
+            {[
+              { icon: Network, title: 'See the landscape', text: 'Explore papers, authors, institutions, and topics in one bounded graph.' },
+              { icon: GitBranch, title: 'Follow citations', text: 'Move from a work to the references it lists and works that cite it.' },
+              { icon: BookOpen, title: 'Build a reading desk', text: 'Save papers, keep private notes, and export your bibliography.' }
+            ].map(({ icon: Icon, title, text }) => <article key={title} className="py-5 md:px-6 first:pl-0 last:pr-0">
+              <Icon className="w-4 h-4 text-sage-900"/><h3 className="text-sm font-semibold mt-3">{title}</h3><p className="text-xs text-neutral-500 leading-5 mt-1.5 max-w-[300px]">{text}</p>
+            </article>)}
+          </div>
+          <p className="mt-5 flex items-center gap-2 text-[11px] text-neutral-500"><Bookmark className="w-3.5 h-3.5"/> Your saved papers and notes stay in your local ResearchGraph workspace.</p>
+        </section>
       </main>
 
-      {/* Footer */}
-      <footer className="py-6 px-8 border-t border-neutral-200 text-center text-xs text-neutral-400">
-        RESEARCHGRAPH — Explore the connections behind research.
+      <footer className="border-t border-neutral-200/80 px-6 md:px-10 py-4 flex items-center justify-between text-[10px] text-neutral-500">
+        <span>RESEARCHGRAPH <span className="mx-2 text-neutral-300">/</span> Scholarly discovery</span><span className="inline-flex items-center gap-1.5"><Sparkles className="w-3 h-3 text-sage-900"/> OpenAlex records</span>
       </footer>
     </div>
   );
