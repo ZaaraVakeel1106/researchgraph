@@ -1,268 +1,88 @@
 import React, { useEffect, useState } from 'react';
 import { PaperStudyData, PaperNote, PaperReferenceItem } from '../../types';
 import { api } from '../../services/api';
-import { BookOpen, Bookmark, FileText, Download, X, ArrowRight, CheckCircle, Tag, Clock, ChevronRight, HelpCircle } from 'lucide-react';
+import { Download, X, ExternalLink, ChevronLeft } from 'lucide-react';
 
-interface PaperStudyModalProps {
-  paperId: string | null;
-  onClose: () => void;
-  onPivotPaper?: (newPaperId: string) => void;
-}
+interface PaperStudyModalProps { paperId: string | null; onClose: () => void; onPivotPaper?: (newPaperId: string) => void; }
 
 export const PaperStudyModal: React.FC<PaperStudyModalProps> = ({ paperId, onClose, onPivotPaper }) => {
   const [data, setData] = useState<PaperStudyData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [note, setNote] = useState<PaperNote>({ paper_id: paperId || '', reading_status: 'Unread', notes_markdown: '' });
   const [savingNote, setSavingNote] = useState(false);
-  const [activeCitationTab, setActiveCitationTab] = useState<'references' | 'cited_by'>('references');
+  const [noteMessage, setNoteMessage] = useState('');
+  const [activeCitationTab, setActiveCitationTab] = useState<'references' | 'cited_by' | 'related'>('references');
+  const [history, setHistory] = useState<string[]>([]);
+
+  const retryLoad = async (id: string) => {
+    setLoading(true); setError('');
+    try {
+      const [study, savedNote] = await Promise.all([api.fetchPaperStudy(id), api.fetchPaperNote(id)]);
+      setData(study); setNote(savedNote);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not retrieve this paper.');
+    } finally { setLoading(false); }
+  };
 
   useEffect(() => {
     if (!paperId) return;
-    setLoading(true);
-    api.fetchPaperStudy(paperId)
-      .then((res) => {
-        setData(res);
-        return api.fetchPaperNote(paperId);
-      })
-      .then((n) => {
-        setNote(n);
-      })
-      .catch((err) => console.error(err))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    setLoading(true); setError(''); setData(null); setNoteMessage('');
+    Promise.all([api.fetchPaperStudy(paperId), api.fetchPaperNote(paperId)])
+      .then(([study, savedNote]) => { if (!cancelled) { setData(study); setNote(savedNote); } })
+      .catch((err) => { if (!cancelled) setError(err.message || 'Could not retrieve this paper.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [paperId]);
 
   if (!paperId) return null;
-
-  const handleSaveNote = async () => {
-    setSavingNote(true);
-    try {
-      await api.savePaperNote(note);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingNote(false);
-    }
+  const navigateTo = (id: string) => { if (!onPivotPaper) return; setHistory((old) => [...old, paperId]); onPivotPaper(id); };
+  const goBack = () => { const prior = history[history.length - 1]; if (!prior || !onPivotPaper) return; setHistory((old) => old.slice(0, -1)); onPivotPaper(prior); };
+  const saveNote = async () => {
+    if (!paperId) return;
+    setSavingNote(true); setNoteMessage('');
+    try { const saved = await api.savePaperNote({ ...note, paper_id: paperId }); setNote(saved); setNoteMessage('Notes saved.'); }
+    catch (err) { setNoteMessage(err instanceof Error ? err.message : 'Could not save notes.'); }
+    finally { setSavingNote(false); }
   };
+  const exportBibtex = () => window.open(`/api/workspace/export/bibtex?paper_ids=${encodeURIComponent(paperId)}`, '_blank', 'noopener,noreferrer');
+  const items: PaperReferenceItem[] = activeCitationTab === 'references' ? (data?.references || []) : activeCitationTab === 'cited_by' ? (data?.cited_by || []) : (data?.related_papers || []);
+  const notAvailable = 'Not available in the source';
 
-  const handleExportBibtex = () => {
-    window.open('/api/workspace/export/bibtex', '_blank');
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white w-full max-w-4xl max-h-[92vh] rounded-2xl border border-neutral-200 shadow-2xl flex flex-col overflow-hidden text-neutral-800">
-        {/* Header */}
-        <div className="p-6 border-b border-neutral-100 flex items-start justify-between bg-neutral-50/60">
-          <div>
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-academic-900 text-white">
-                EDITORIAL STUDY VIEW
-              </span>
-              {data && (
-                <span className="text-xs text-neutral-500 font-mono">
-                  {data.venue} • {data.publication_year} • {data.citation_count.toLocaleString()} citations
-                </span>
-              )}
-            </div>
-            <h2 className="text-xl font-bold text-neutral-900 leading-snug">
-              {loading ? 'Loading paper study view...' : data?.title}
-            </h2>
+  return <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-900/60">
+    <section className="bg-white w-full max-w-5xl max-h-[94vh] rounded-xl border border-neutral-200 shadow-2xl flex flex-col overflow-hidden text-neutral-800">
+      <header className="p-5 border-b flex items-start justify-between gap-4 bg-neutral-50">
+        <div className="min-w-0">{history.length > 0 && <button onClick={goBack} className="text-xs text-teal-800 inline-flex items-center mb-2"><ChevronLeft className="w-4 h-4" />Previous paper</button>}
+          <p className="text-[10px] font-bold uppercase tracking-wider text-teal-800">Paper study</p>
+          <h2 className="text-lg font-bold mt-1">{loading ? 'Loading paper…' : data?.title || 'Paper details unavailable'}</h2>
+          {data && <p className="text-xs text-neutral-600 mt-1">{data.venue || notAvailable} · {data.publication_year || notAvailable} · {data.citation_count ?? notAvailable} citations</p>}
+        </div><button onClick={onClose} aria-label="Close study view"><X className="w-5 h-5" /></button>
+      </header>
+      {loading ? <div className="p-12 text-center text-sm text-neutral-500">Loading OpenAlex record and citation context…</div> : error ? <div role="alert" className="m-6 p-5 rounded-lg bg-rose-50 text-rose-800 text-sm">{error}<button onClick={() => retryLoad(paperId)} className="ml-3 underline">Retry</button></div> : data ? <main className="p-5 overflow-y-auto flex-1 space-y-5 text-sm">
+        <section className="grid md:grid-cols-2 gap-4">
+          <div className="space-y-2"><h3 className="font-semibold">Paper overview</h3>
+            <p><strong>Authors: </strong>{data.authors.length ? data.authors.map(a => a.name).filter(Boolean).join(', ') : notAvailable}</p>
+            <p><strong>Publication date: </strong>{data.publication_date || notAvailable}</p><p><strong>Source: </strong>{data.venue || notAvailable}</p>
+            <p><strong>DOI: </strong>{data.doi || notAvailable}</p><p><strong>OpenAlex ID: </strong>{data.id}</p>
+            <p><strong>Open access: </strong>{data.open_access === undefined || data.open_access === null ? notAvailable : data.open_access ? 'Yes' : 'No'}</p>
+            {data.topics.length > 0 && <p><strong>Topics: </strong>{data.topics.join(', ')}</p>}
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Modal Body */}
-        {loading ? (
-          <div className="p-12 text-center text-neutral-500 flex flex-col items-center space-y-3">
-            <div className="w-8 h-8 border-2 border-academic-900 border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm">Synthesizing paper context, citation references, and graph relationships...</p>
+          <div className="p-4 bg-neutral-50 rounded-lg space-y-2"><h3 className="font-semibold">Read the paper</h3>
+            {data.open_access_pdf ? <a href={data.open_access_pdf} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-teal-800 underline">Open available full text / PDF <ExternalLink className="w-3 h-3" /></a> : <p className="text-neutral-600">No open access PDF is listed by OpenAlex.</p>}
+            {(data.landing_page || data.doi || data.source_url) && <div className="flex flex-wrap gap-3">{data.landing_page && <a href={data.landing_page} target="_blank" rel="noreferrer" className="underline text-teal-800">Publisher or source page</a>}{data.doi && <a href={data.doi} target="_blank" rel="noreferrer" className="underline text-teal-800">DOI page</a>}{data.source_url && <a href={data.source_url} target="_blank" rel="noreferrer" className="underline text-teal-800">OpenAlex record</a>}</div>}
           </div>
-        ) : data ? (
-          <div className="p-6 space-y-6 overflow-y-auto flex-1 text-sm">
-            {/* Authors & Institutions */}
-            <div className="flex flex-wrap gap-2 text-xs text-neutral-600 bg-neutral-50 p-3 rounded-xl border border-neutral-200">
-              <span className="font-semibold text-neutral-800">Authors:</span>
-              {data.authors.map((a, idx) => (
-                <span key={idx} className="bg-white px-2 py-0.5 rounded border border-neutral-200 font-medium">
-                  {a.name} ({a.institution || 'Research Inst.'})
-                </span>
-              ))}
-            </div>
-
-            {/* Abstract Section Breakdown */}
-            <div className="space-y-3">
-              <h3 className="font-bold text-neutral-900 text-base flex items-center space-x-2">
-                <FileText className="w-4 h-4 text-academic-900" />
-                <span>Why This Paper Matters (Structure & Methodology)</span>
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200/80 space-y-1">
-                  <div className="text-xs font-bold text-teal-800 uppercase tracking-wider">Research Problem</div>
-                  <p className="text-xs text-neutral-700 leading-relaxed">{data.abstract_breakdown.problem}</p>
-                </div>
-                <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200/80 space-y-1">
-                  <div className="text-xs font-bold text-amber-800 uppercase tracking-wider">Methodology & Approach</div>
-                  <p className="text-xs text-neutral-700 leading-relaxed">{data.abstract_breakdown.methodology}</p>
-                </div>
-                <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200/80 space-y-1">
-                  <div className="text-xs font-bold text-indigo-800 uppercase tracking-wider">Key Reported Results</div>
-                  <p className="text-xs text-neutral-700 leading-relaxed">{data.abstract_breakdown.results}</p>
-                </div>
-                <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200/80 space-y-1">
-                  <div className="text-xs font-bold text-rose-800 uppercase tracking-wider">Stated Limitations</div>
-                  <p className="text-xs text-neutral-700 leading-relaxed">{data.abstract_breakdown.limitations}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Research Context Chain */}
-            <div className="space-y-3 pt-2">
-              <h3 className="font-bold text-neutral-900 text-base flex items-center space-x-2">
-                <Clock className="w-4 h-4 text-academic-900" />
-                <span>Research Context & Temporal Chain</span>
-              </h3>
-              <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 flex flex-col md:flex-row items-center justify-between gap-4">
-                {/* Predecessors */}
-                <div className="flex-1 w-full bg-white p-3 rounded-xl border border-neutral-200 text-xs space-y-1">
-                  <div className="text-[10px] font-bold text-neutral-400 uppercase">Predecessor Work (References)</div>
-                  {data.research_context.predecessors.slice(0, 2).map((p, idx) => (
-                    <div key={idx} className="font-medium text-neutral-800 truncate">{p.title} ({p.year})</div>
-                  ))}
-                </div>
-                <ArrowRight className="w-5 h-5 text-neutral-400 hidden md:block shrink-0" />
-                {/* Current */}
-                <div className="flex-1 w-full bg-teal-50 p-3 rounded-xl border border-teal-200 text-xs space-y-1 shadow-xs">
-                  <div className="text-[10px] font-bold text-teal-800 uppercase">Selected Paper</div>
-                  <div className="font-bold text-teal-900 truncate">{data.title} ({data.publication_year})</div>
-                </div>
-                <ArrowRight className="w-5 h-5 text-neutral-400 hidden md:block shrink-0" />
-                {/* Successors */}
-                <div className="flex-1 w-full bg-white p-3 rounded-xl border border-neutral-200 text-xs space-y-1">
-                  <div className="text-[10px] font-bold text-neutral-400 uppercase">Subsequent Work (Citing)</div>
-                  {data.research_context.successors.slice(0, 2).map((s, idx) => (
-                    <div key={idx} className="font-medium text-neutral-800 truncate">{s.title} ({s.year})</div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Interactive References vs Cited By Tabs */}
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
-                <div className="flex space-x-4 text-sm font-bold">
-                  <button
-                    onClick={() => setActiveCitationTab('references')}
-                    className={`pb-1 transition ${activeCitationTab === 'references' ? 'text-academic-900 border-b-2 border-academic-900' : 'text-neutral-400 hover:text-neutral-700'}`}
-                  >
-                    References ({data.references?.length || 2})
-                  </button>
-                  <button
-                    onClick={() => setActiveCitationTab('cited_by')}
-                    className={`pb-1 transition ${activeCitationTab === 'cited_by' ? 'text-academic-900 border-b-2 border-academic-900' : 'text-neutral-400 hover:text-neutral-700'}`}
-                  >
-                    Cited By ({data.cited_by?.length || 2})
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {(activeCitationTab === 'references' ? data.references : data.cited_by)?.map((refItem: PaperReferenceItem, idx: number) => (
-                  <div key={idx} className="bg-white p-3.5 rounded-xl border border-neutral-200 hover:border-academic-900 transition flex items-center justify-between">
-                    <div>
-                      <h4 className="font-semibold text-neutral-900 text-xs">{refItem.title}</h4>
-                      <p className="text-[11px] text-neutral-500 font-mono mt-0.5">{refItem.venue} ({refItem.year})</p>
-                      {refItem.rationale && <p className="text-[10px] text-academic-900 mt-1 font-medium">💡 {refItem.rationale}</p>}
-                    </div>
-                    {onPivotPaper && (
-                      <button
-                        onClick={() => onPivotPaper(refItem.id)}
-                        className="p-1.5 text-neutral-400 hover:text-academic-900 rounded-lg hover:bg-neutral-100"
-                        title="Pivot to this paper"
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* "Why am I seeing this?" Recommended Next Cards */}
-            <div className="space-y-3 pt-2">
-              <h3 className="font-bold text-neutral-900 text-base">Recommended Literature & "Why Am I Seeing This?"</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {data.recommended_next.map((rec, idx) => (
-                  <div key={idx} className="bg-white p-3.5 rounded-xl border border-neutral-200 flex flex-col justify-between space-y-2">
-                    <div>
-                      <h4 className="font-semibold text-neutral-900 text-xs line-clamp-2">{rec.title}</h4>
-                      <p className="text-[11px] text-neutral-500 mt-1 font-mono">{rec.venue} ({rec.year})</p>
-                    </div>
-                    <div className="bg-academic-50 p-2 rounded-lg text-[11px] text-academic-900 font-medium leading-tight">
-                      💡 {rec.graph_rationale}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Personal Workspace Notes & Reading Status */}
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-neutral-900 text-base">Personal Research Notes</h3>
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs text-neutral-500">Reading Status:</span>
-                  <select
-                    value={note.reading_status}
-                    onChange={(e) => setNote({ ...note, reading_status: e.target.value as any })}
-                    className="text-xs bg-neutral-100 border border-neutral-200 rounded-lg px-2.5 py-1 font-semibold text-neutral-800"
-                  >
-                    <option value="Unread">Unread</option>
-                    <option value="Reading">Reading</option>
-                    <option value="Read">Read</option>
-                    <option value="Important">Important</option>
-                  </select>
-                </div>
-              </div>
-              <textarea
-                value={note.notes_markdown}
-                onChange={(e) => setNote({ ...note, notes_markdown: e.target.value })}
-                placeholder="Write your personal literature review notes, key findings, or open research questions for this paper..."
-                rows={4}
-                className="w-full p-3 rounded-xl border border-neutral-200 text-xs focus:ring-2 focus:ring-academic-900 focus:outline-none bg-neutral-50/50"
-              />
-              <button
-                onClick={handleSaveNote}
-                disabled={savingNote}
-                className="px-4 py-2 bg-neutral-900 text-white rounded-lg text-xs font-medium hover:bg-neutral-800 transition"
-              >
-                {savingNote ? 'Saving...' : 'Save Notes'}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {/* Footer */}
-        <div className="p-4 border-t border-neutral-100 bg-neutral-50 flex items-center justify-between">
-          <button
-            onClick={handleExportBibtex}
-            className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-white border border-neutral-200 rounded-xl text-xs font-medium text-neutral-700 hover:bg-neutral-100 transition shadow-xs"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export BibTeX</span>
-          </button>
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 bg-academic-900 text-white rounded-xl text-xs font-medium hover:bg-academic-800 transition shadow-xs"
-          >
-            Close Study View
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+        </section>
+        <section className="space-y-2"><h3 className="font-semibold">Abstract</h3><p className="p-4 bg-[#fbfaf7] border rounded-lg whitespace-pre-wrap leading-relaxed">{data.abstract || 'Abstract not available in the source.'}</p><p className="text-xs text-neutral-500">The abstract is not the complete paper. Research problem, methods, results and limitations are not inferred from the title.</p></section>
+        <section className="space-y-3"><div className="flex gap-4 border-b">{(['references', 'cited_by', 'related'] as const).map(tab => <button key={tab} onClick={() => setActiveCitationTab(tab)} className={`pb-2 text-xs font-semibold ${activeCitationTab === tab ? 'border-b-2 border-teal-800 text-teal-900' : 'text-neutral-500'}`}>{tab === 'references' ? `References (${data.references.length})` : tab === 'cited_by' ? `Cited by (${data.cited_by.length})` : `Related works (${data.related_papers.length})`}</button>)}</div>
+          {items.length ? <ul className="divide-y">{items.map(item => <li key={item.id} className="py-3 flex justify-between items-center gap-3"><div><p className="font-medium">{item.title}</p><p className="text-xs text-neutral-500">{item.venue || notAvailable} · {item.year ?? notAvailable}{item.authors?.length ? ` · ${item.authors.join(', ')}` : ''}</p></div><button onClick={() => navigateTo(item.id)} className="text-xs text-teal-800 underline shrink-0">Open paper</button></li>)}</ul> : <p className="text-sm text-neutral-500 py-4">No {activeCitationTab === 'cited_by' ? 'citing works' : activeCitationTab === 'references' ? 'references' : 'related works'} were retrieved.</p>}
+        </section>
+        <section className="space-y-3 border-t pt-4"><div className="flex items-center justify-between"><h3 className="font-semibold">Personal notes</h3><select value={note.reading_status} onChange={e => setNote({ ...note, reading_status: e.target.value as PaperNote['reading_status'] })} className="border rounded px-2 py-1 text-xs"><option>Unread</option><option>Reading</option><option>Read</option><option>Important</option></select></div>
+          <textarea value={note.notes_markdown} onChange={e => setNote({ ...note, notes_markdown: e.target.value })} rows={4} className="w-full border rounded-lg p-3 text-sm" placeholder="Your notes for this paper" />
+          <div className="flex items-center gap-3"><button onClick={saveNote} disabled={savingNote} className="px-4 py-2 bg-academic-900 text-white rounded-lg text-xs">{savingNote ? 'Saving…' : 'Save notes'}</button><span role="status" className="text-xs text-neutral-600">{noteMessage}</span></div>
+        </section>
+      </main> : null}
+      <footer className="p-3 border-t bg-neutral-50 flex justify-between"><button onClick={exportBibtex} disabled={!data} className="inline-flex gap-2 items-center px-3 py-2 border rounded-lg text-xs disabled:opacity-50"><Download className="w-4 h-4" />Export BibTeX</button><button onClick={onClose} className="px-4 py-2 bg-academic-900 text-white rounded-lg text-xs">Close</button></footer>
+    </section>
+  </div>;
 };

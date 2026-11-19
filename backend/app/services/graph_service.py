@@ -1,297 +1,181 @@
+"""Build bounded graphs only from records and relationships returned by OpenAlex."""
+from typing import Any
 import networkx as nx
-import logging
-from typing import Dict, Any, List, Optional, Tuple
-from app.services.openalex_service import openalex_service, SEED_WORKS
 
-logger = logging.getLogger("graph_service")
+from app.services.openalex_service import openalex_service
+
 
 class GraphService:
-    def build_graph_for_topic(
-        self,
-        topic_query: str = "Graph Neural Networks",
-        mode: str = "landscape",
-        center_node_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Constructs a NetworkX graph with topological relevance tiering (Core, Related, Adjacent) and connection explanations."""
-        G = nx.Graph()
-        diG = nx.DiGraph()
+    async def build_graph_for_topic(self, topic_query: str, mode: str = "landscape", scope: str = "core", center_node_id: str | None = None, limit: int = 15, hops: int = 2) -> dict[str, Any]:
+        if center_node_id:
+            center_work = await openalex_service.get_work(center_node_id)
+            core_ids = [center_work["id"]]
+        else:
+            core_items = await openalex_service.search(topic_query, "works", limit=max(1, min(limit, 30)))
+            core_ids = [x["id"] for x in core_items]
+        works = {w["id"]: w for w in await openalex_service.get_works(core_ids, 30)}
+        if center_node_id and core_ids[0] not in works:
+            center_work = await openalex_service.get_work(center_node_id)
+            works[center_work["id"]] = center_work
+        core_ids = [x for x in core_ids if x in works]
+        expanded: set[str] = set()
+        if scope in ("related", "full"):
+            for wid in core_ids[:10]:
+                w = works[wid]
+                expanded.update(w.get("referenced_works", [])[:8])
+                expanded.update(w.get("related_works", [])[:5])
+            expanded -= set(core_ids)
+            for item in await openalex_service.get_works(list(expanded), 40):
+                works[item["id"]] = item
+        if scope == "full":
+            citing_ids = []
+            for wid in core_ids[:5]:
+                citing_ids.extend(w["id"] for w in await openalex_service.citing_works(wid, 10))
+            citing_ids = list(dict.fromkeys(citing_ids))[:20]
+            for item in await openalex_service.get_works(citing_ids, 20):
+                works[item["id"]] = item
 
-        raw_works = SEED_WORKS
-        query_lower = topic_query.lower()
-
-        # Add Nodes & Edges from SEED_WORKS / OpenAlex data
-        for work in raw_works:
-            w_id = work["id"]
-
-            # Relevance score & tier calculation
-            title_lower = work["title"].lower()
-            is_core_paper = query_lower in title_lower or any(query_lower in t.lower() for t in work.get("topics", []))
-            rel_tier = "core" if is_core_paper else "related"
-
-            paper_attr = {
-                "id": w_id,
-                "label": work["title"],
-                "type": "paper",
-                "year": work["publication_year"],
-                "citations": work["cited_by_count"],
-                "sub_label": f"{work['venue']} ({work['publication_year']})",
-                "relevance_tier": rel_tier,
-                "connection_rationale": f"Core paper matching '{topic_query}'" if is_core_paper else f"Connected work cited by or citing core literature in {topic_query}."
-            }
-            G.add_node(w_id, **paper_attr)
-            diG.add_node(w_id, **paper_attr)
-
-            # Author Nodes & Authorship Edges
+        graph = nx.Graph()
+        directed_citations = nx.DiGraph()
+        core_set = set(core_ids)
+        for wid, work in works.items():
+            tier = "core" if wid in core_set else "related"
+            node = {"id": wid, "label": work.get("title") or "Not available in the source", "type": "paper",
+                    "year": work.get("publication_year"), "citations": work.get("citation_count"),
+                    "sub_label": " · ".join(filter(None, [work.get("venue"), str(work.get("publication_year") or "")])),
+                    "relevance_tier": tier, "data": {"source_id": work.get("source_id"), "source_url": work.get("source_url"), "doi": work.get("doi"),
+                                                         "venue": work.get("venue"), "authors": [a.get("name") for a in work.get("authors", []) if a.get("name")]}}
+            graph.add_node(wid, **node); directed_citations.add_node(wid)
             for author in work.get("authors", []):
-                a_id = author["id"]
-                if not G.has_node(a_id):
-                    author_attr = {
-                        "id": a_id,
-                        "label": author["name"],
-                        "type": "author",
-                        "sub_label": author.get("institution", "Academic Researcher"),
-                        "citations": work["cited_by_count"],
-                        "relevance_tier": "core" if is_core_paper else "related",
-                        "connection_rationale": f"Author of key paper '{work['title']}' in {topic_query}."
-                    }
-                    G.add_node(a_id, **author_attr)
-                    diG.add_node(a_id, **author_attr)
-                
-                G.add_edge(a_id, w_id, type="authored", weight=1.0)
-                diG.add_edge(a_id, w_id, type="authored", weight=1.0)
+                aid = author.get("id")
+                if aid:
+                    graph.add_node(aid, id=aid, label=author.get("name") or "Not available in the source", type="author", sub_label=None, relevance_tier=tier,
+                                   data={"source_id": aid, "source_url": f"https://openalex.org/{aid}"})
+                    graph.add_edge(wid, aid, type="authored", label="authorship", rationale="OpenAlex authorship record")
+                for inst in author.get("institutions", []):
+                    iid = inst.get("id")
+                    if aid and iid:
+                        graph.add_node(iid, id=iid, label=inst.get("name") or "Not available in the source", type="institution", relevance_tier=tier,
+                                       data={"source_id": iid, "source_url": f"https://openalex.org/{iid}"})
+                        graph.add_edge(aid, iid, type="affiliated_with", label="affiliation", rationale="OpenAlex authorship affiliation")
+            topic_records = work.get("topic_records") or [{"name": name} for name in work.get("topics", [])]
+            for topic in topic_records[:8]:
+                tid = topic.get("id") or ("T:" + topic["name"].strip().casefold())
+                graph.add_node(tid, id=tid, label=topic.get("name"), type="topic", relevance_tier=tier,
+                               data={"source_id": topic.get("id"), "source_url": topic.get("source_url")} if topic.get("id") else {})
+                graph.add_edge(wid, tid, type="has_topic", label="topic", rationale="OpenAlex topic assignment")
 
-                # Institution Node & Affiliation Edge
-                inst_name = author.get("institution")
-                if inst_name:
-                    inst_id = f"I_{inst_name.replace(' ', '_')}"
-                    if not G.has_node(inst_id):
-                        inst_attr = {
-                            "id": inst_id,
-                            "label": inst_name,
-                            "type": "institution",
-                            "sub_label": "Research Institution",
-                            "relevance_tier": "related",
-                            "connection_rationale": f"Affiliated institution of researchers publishing in {topic_query}."
-                        }
-                        G.add_node(inst_id, **inst_attr)
-                        diG.add_node(inst_id, **inst_attr)
-                    G.add_edge(a_id, inst_id, type="affiliated_with", weight=1.0)
+        # Citation edges point from the citing paper to its referenced work.
+        for wid, work in works.items():
+            for ref_id in work.get("referenced_works", []):
+                if ref_id in works:
+                    graph.add_edge(wid, ref_id, type="cites", label="cites", rationale="OpenAlex referenced_works", citation_source=wid, citation_target=ref_id)
+                    directed_citations.add_edge(wid, ref_id)
+            for related_id in work.get("related_works", []):
+                if related_id in works:
+                    graph.add_edge(wid, related_id, type="related_work", label="related work", rationale="OpenAlex related_works")
 
-            # Topic Nodes & Topic Edges with Relevance Tiering
-            for topic in work.get("topics", []):
-                t_id = f"T_{topic.replace(' ', '_')}"
-                t_lower = topic.lower()
-
-                if "graph" in t_lower or query_lower in t_lower:
-                    topic_tier = "core"
-                    rationale = f"Direct core research topic matching '{topic_query}'."
-                elif any(term in t_lower for term in ["attention", "semi-supervised", "learning", "deep"]):
-                    topic_tier = "related"
-                    rationale = f"Strongly connected research area linked through paper methodology in {topic_query}."
-                else:
-                    topic_tier = "adjacent"
-                    rationale = f"Adjacent research domain connected via interdisciplinary paper applications (e.g. Transformers & NLP)."
-
-                if not G.has_node(t_id):
-                    topic_attr = {
-                        "id": t_id,
-                        "label": topic,
-                        "type": "topic",
-                        "sub_label": f"{topic_tier.capitalize()} Research Area",
-                        "relevance_tier": topic_tier,
-                        "connection_rationale": rationale
-                    }
-                    G.add_node(t_id, **topic_attr)
-                    diG.add_node(t_id, **topic_attr)
-                G.add_edge(w_id, t_id, type="has_topic", weight=1.0)
-
-            # Citation Edges
-            for cited_id in work.get("citations", []):
-                if cited_id in [w["id"] for w in raw_works]:
-                    G.add_edge(w_id, cited_id, type="cites", weight=1.0)
-                    diG.add_edge(w_id, cited_id, type="cites", weight=1.0)
-
-        # Mode Filtering
-        filtered_G = self._apply_mode_filter(G, mode)
-
-        # If re-centered on a node, compute k-hop subgraph around center
-        if center_node_id and filtered_G.has_node(center_node_id):
-            center_neighbors = set(nx.single_source_shortest_path_length(filtered_G, center_node_id, cutoff=2).keys())
-            filtered_G = filtered_G.subgraph(center_neighbors).copy()
-
-        # Calculate Graph Metrics using NetworkX
-        metrics = self._compute_graph_metrics(filtered_G, diG)
-
-        # Detect Communities
-        communities = self._detect_communities(filtered_G)
-
-        # Format output
-        nodes_output = []
-        for n, data in filtered_G.nodes(data=True):
-            node_metrics = {
-                "pagerank": round(metrics["pagerank"].get(n, 0.0), 4),
-                "degree_centrality": round(metrics["degree_centrality"].get(n, 0.0), 4),
-                "betweenness_centrality": round(metrics["betweenness_centrality"].get(n, 0.0), 4),
-                "community_id": metrics["community_map"].get(n, 0)
-            }
-            node_copy = dict(data)
-            node_copy["metrics"] = node_metrics
-            nodes_output.append(node_copy)
-
-        edges_output = []
-        for u, v, data in filtered_G.edges(data=True):
-            edges_output.append({
-                "id": f"{u}->{v}",
-                "source": u,
-                "target": v,
-                "type": data.get("type", "connected_to"),
-                "label": data.get("label", data.get("type")),
-                "weight": data.get("weight", 1.0)
-            })
-
-        stats = {
-            "total_nodes": len(nodes_output),
-            "total_edges": len(edges_output),
-            "paper_count": len([n for n in nodes_output if n.get("type") == "paper"]),
-            "author_count": len([n for n in nodes_output if n.get("type") == "author"]),
-            "institution_count": len([n for n in nodes_output if n.get("type") == "institution"]),
-            "topic_count": len([n for n in nodes_output if n.get("type") == "topic"]),
-            "core_count": len([n for n in nodes_output if n.get("relevance_tier") == "core"]),
-            "related_count": len([n for n in nodes_output if n.get("relevance_tier") == "related"]),
-            "adjacent_count": len([n for n in nodes_output if n.get("relevance_tier") == "adjacent"]),
-            "community_count": len(communities),
-            "density": round(nx.density(filtered_G), 4)
-        }
-
-        return {
-            "nodes": nodes_output,
-            "edges": edges_output,
-            "stats": stats,
-            "communities": communities
-        }
-
-    def _apply_mode_filter(self, G: nx.Graph, mode: str) -> nx.Graph:
+        if center_node_id and center_node_id in graph:
+            keep = set(nx.single_source_shortest_path_length(graph, center_node_id, cutoff=max(1, min(hops, 3))))
+            graph = graph.subgraph(keep).copy()
         if mode == "citation":
-            paper_nodes = [n for n, d in G.nodes(data=True) if d.get("type") == "paper"]
-            subG = G.subgraph(paper_nodes).copy()
-            edges_to_remove = [(u, v) for u, v, d in subG.edges(data=True) if d.get("type") != "cites"]
-            subG.remove_edges_from(edges_to_remove)
-            return subG
-
+            graph = graph.subgraph([n for n, d in graph.nodes(data=True) if d.get("type") == "paper"]).copy()
+            graph.remove_edges_from([(u, v) for u, v, d in graph.edges(data=True) if d.get("type") != "cites"])
         elif mode == "author_collaboration":
-            author_nodes = [n for n, d in G.nodes(data=True) if d.get("type") == "author"]
-            subG = G.subgraph(author_nodes).copy()
-            edges_to_remove = [(u, v) for u, v, d in subG.edges(data=True) if d.get("type") != "collaborates_with"]
-            subG.remove_edges_from(edges_to_remove)
-            return subG
-
+            papers = [n for n, d in graph.nodes(data=True) if d.get("type") == "paper"]
+            collab = nx.Graph()
+            for paper in papers:
+                authors = [n for n in graph.neighbors(paper) if graph.nodes[n].get("type") == "author"]
+                collab.add_nodes_from((a, graph.nodes[a]) for a in authors)
+                for i, author in enumerate(authors):
+                    for other in authors[i + 1:]: collab.add_edge(author, other, type="collaborates_with", label="co-authorship", rationale=f"Both authors are listed on OpenAlex work {paper}")
+            graph = collab
         elif mode == "topic":
-            topic_nodes = [n for n, d in G.nodes(data=True) if d.get("type") == "topic"]
-            subG = nx.Graph()
-            for t in topic_nodes:
-                subG.add_node(t, **G.nodes[t])
-            paper_nodes = [n for n, d in G.nodes(data=True) if d.get("type") == "paper"]
-            for p in paper_nodes:
-                p_topics = [nbr for nbr in G.neighbors(p) if G.nodes[nbr].get("type") == "topic"]
-                for i in range(len(p_topics)):
-                    for j in range(i + 1, len(p_topics)):
-                        t1, t2 = p_topics[i], p_topics[j]
-                        if subG.has_edge(t1, t2):
-                            subG[t1][t2]["weight"] += 1.0
-                        else:
-                            subG.add_edge(t1, t2, type="topic_rel", weight=1.0, label="Co-occurring Topics")
-            return subG
+            topics = [n for n, d in graph.nodes(data=True) if d.get("type") == "topic"]
+            topic_graph = nx.Graph(); topic_graph.add_nodes_from((n, graph.nodes[n]) for n in topics)
+            for paper in [n for n, d in graph.nodes(data=True) if d.get("type") == "paper"]:
+                attached = [n for n in graph.neighbors(paper) if graph.nodes[n].get("type") == "topic"]
+                for i, left in enumerate(attached):
+                    for right in attached[i + 1:]: topic_graph.add_edge(left, right, type="topic_association", label="co-occurs on work", rationale=f"Both topics are assigned to OpenAlex work {paper}")
+            graph = topic_graph
 
-        return G
+        metrics = self._metrics(graph)
+        communities = self._communities(graph)
+        nodes = []
+        for n, data in graph.nodes(data=True):
+            nd = dict(data)
+            nd["metrics"] = {"pagerank": round(metrics["pagerank"].get(n, 0), 5), "degree_centrality": round(metrics["degree"].get(n, 0), 5),
+                             "betweenness_centrality": round(metrics["between"].get(n, 0), 5), "community_id": metrics["community"].get(n, 0)}
+            nodes.append(nd)
+        edges = [{"id": f"{d.get('citation_source', u)}->{d.get('citation_target', v)}:{d.get('type')}",
+                  "source": d.get("citation_source", u), "target": d.get("citation_target", v), "type": d.get("type", "related"),
+                  "label": d.get("label"), "weight": 1.0, "rationale": d.get("rationale")} for u, v, d in graph.edges(data=True)]
+        counts = {kind: sum(1 for _, d in graph.nodes(data=True) if d.get("type") == kind) for kind in ("paper", "author", "institution", "topic")}
+        return {"nodes": nodes, "edges": edges, "communities": communities,
+                "stats": {"total_nodes": graph.number_of_nodes(), "total_edges": graph.number_of_edges(), **{f"{k}_count": v for k, v in counts.items()},
+                          "core_count": sum(1 for _, d in graph.nodes(data=True) if d.get("relevance_tier") == "core"),
+                          "related_count": sum(1 for _, d in graph.nodes(data=True) if d.get("relevance_tier") == "related"), "community_count": len(communities),
+                          "density": round(nx.density(graph), 5) if graph.number_of_nodes() > 1 else 0.0,
+                          "query": topic_query, "scope": scope, "expansion_depth": 0 if scope == "core" else (1 if scope == "related" else 2)}}
 
-    def _compute_graph_metrics(self, G: nx.Graph, diG: nx.DiGraph) -> Dict[str, Any]:
-        if len(G) == 0:
-            return {"pagerank": {}, "degree_centrality": {}, "betweenness_centrality": {}, "community_map": {}}
-
+    def _metrics(self, graph: nx.Graph) -> dict:
+        if not len(graph): return {"pagerank": {}, "degree": {}, "between": {}, "community": {}}
+        citation_graph = nx.DiGraph()
+        citation_graph.add_nodes_from(graph.nodes)
+        citation_graph.add_edges_from((data.get("citation_source", u), data.get("citation_target", v)) for u, v, data in graph.edges(data=True) if data.get("type") == "cites")
         try:
-            pagerank = nx.pagerank(G, alpha=0.85)
+            pagerank = nx.pagerank(citation_graph, alpha=.85) if citation_graph.number_of_edges() else {n: 0.0 for n in graph}
         except Exception:
-            pagerank = {n: 1.0 / len(G) for n in G.nodes()}
-
-        degree_centrality = nx.degree_centrality(G)
-        betweenness_centrality = nx.betweenness_centrality(G)
-
-        community_map = {}
+            pagerank = {n: 0.0 for n in graph}
+        degree = nx.degree_centrality(graph)
+        between = nx.betweenness_centrality(graph) if len(graph) > 2 else {n: 0 for n in graph}
+        comm = {}
         try:
-            comms = list(nx.community.greedy_modularity_communities(G))
-            for cid, comm in enumerate(comms):
-                for node in comm:
-                    community_map[node] = cid + 1
-        except Exception:
-            for node in G.nodes():
-                community_map[node] = 1
+            for i, group in enumerate(nx.community.greedy_modularity_communities(graph), 1):
+                for n in group: comm[n] = i
+        except (nx.NetworkXError, ZeroDivisionError):
+            comm = {n: i for i, n in enumerate(graph, 1)}
+        return {"pagerank": pagerank, "degree": degree, "between": between, "community": comm}
 
-        return {
-            "pagerank": pagerank,
-            "degree_centrality": degree_centrality,
-            "betweenness_centrality": betweenness_centrality,
-            "community_map": community_map
-        }
+    def _communities(self, graph: nx.Graph) -> list[dict]:
+        if not graph.number_of_edges(): return []
+        metrics = self._metrics(graph)
+        result = []
+        groups = {}
+        for n in graph: groups.setdefault(metrics["community"].get(n, 0), []).append(n)
+        for cid, members in groups.items():
+            papers = [n for n in members if graph.nodes[n].get("type") == "paper"]
+            authors = [n for n in members if graph.nodes[n].get("type") == "author"]
+            topics = [n for n in members if graph.nodes[n].get("type") == "topic"]
+            result.append({"id": cid, "name": f"Community {cid}", "size": len(members), "dominant_topic": graph.nodes[topics[0]]["label"] if topics else "Not available in the source",
+                           "paper_count": len(papers), "author_count": len(authors), "topic_count": len(topics),
+                           "sample_papers": [graph.nodes[n]["label"] for n in papers[:3]], "sample_authors": [graph.nodes[n]["label"] for n in authors[:3]]})
+        return result
 
-    def _detect_communities(self, G: nx.Graph) -> List[Dict[str, Any]]:
-        if len(G) == 0:
-            return []
-
+    async def find_shortest_path(self, source_id: str, target_id: str) -> dict:
+        from fastapi import HTTPException
+        source = await openalex_service.get_work(source_id)
+        target = await openalex_service.get_work(target_id)
+        ids = [source["id"], target["id"]]
+        ids += source.get("referenced_works", [])[:20] + target.get("referenced_works", [])[:20]
+        works = await openalex_service.get_works(list(dict.fromkeys(ids)), 42)
+        by_id = {work["id"]: work for work in works}
+        by_id[source["id"]] = source; by_id[target["id"]] = target
+        graph = nx.DiGraph()
+        graph.add_nodes_from(by_id)
+        for work in by_id.values():
+            for reference in work.get("referenced_works", []):
+                if reference in by_id:
+                    graph.add_edge(work["id"], reference)
         try:
-            comms = list(nx.community.greedy_modularity_communities(G))
-        except Exception:
-            comms = [set(G.nodes())]
-
-        community_list = []
-        for cid, comm in enumerate(comms):
-            nodes = list(comm)
-            papers = [n for n in nodes if G.nodes[n].get("type") == "paper"]
-            authors = [n for n in nodes if G.nodes[n].get("type") == "author"]
-            topics = [n for n in nodes if G.nodes[n].get("type") == "topic"]
-            
-            dominant_topic = G.nodes[topics[0]].get("label") if topics else "Interdisciplinary Cluster"
-
-            community_list.append({
-                "id": cid + 1,
-                "name": f"Community {cid + 1}: {dominant_topic}",
-                "size": len(nodes),
-                "dominant_topic": dominant_topic,
-                "paper_count": len(papers),
-                "author_count": len(authors),
-                "topic_count": len(topics),
-                "sample_papers": [G.nodes[p].get("label") for p in papers[:3]],
-                "sample_authors": [G.nodes[a].get("label") for a in authors[:3]]
-            })
-
-        return community_list
-
-    def find_shortest_path(self, source_id: str, target_id: str) -> Dict[str, Any]:
-        graph_data = self.build_graph_for_topic(mode="landscape")
-        G = nx.Graph()
-        for edge in graph_data["edges"]:
-            G.add_edge(edge["source"], edge["target"], weight=edge.get("weight", 1.0))
-        
-        for node in graph_data["nodes"]:
-            if node["id"] not in G:
-                G.add_node(node["id"])
-
-        if not G.has_node(source_id) or not G.has_node(target_id):
-            return {"found": False, "message": "Source or target node not found in graph."}
-
-        try:
-            path_nodes = nx.shortest_path(G, source=source_id, target=target_id)
-            path_length = nx.shortest_path_length(G, source=source_id, target=target_id)
-            node_map = {n["id"]: n for n in graph_data["nodes"]}
-            path_details = [node_map.get(n, {"id": n, "label": n, "type": "unknown"}) for n in path_nodes]
-
-            return {
-                "found": True,
-                "path_length": path_length,
-                "path_nodes": path_nodes,
-                "path_details": path_details,
-                "explanation": f"Found shortest connection of {path_length} hops passing through {len(path_nodes) - 2} intermediate entities."
-            }
+            path = nx.shortest_path(graph, source["id"], target["id"])
         except nx.NetworkXNoPath:
-            return {"found": False, "message": "No connected citation or collaboration path exists between these entities."}
+            return {"found": False, "message": "No directed citation path was found in the bounded retrieved records."}
+        except nx.NodeNotFound as exc:
+            raise HTTPException(status_code=404, detail="A selected OpenAlex work was not found.") from exc
+        details = [{"id": wid, "label": by_id[wid].get("title") or "Not available in the source", "type": "paper"} for wid in path]
+        return {"found": True, "path_length": len(path) - 1, "path_nodes": path, "path_details": details,
+                "explanation": "A directed citation path was found; each arrow points from a citing work to a referenced work."}
+
 
 graph_service = GraphService()

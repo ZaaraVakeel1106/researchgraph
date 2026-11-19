@@ -1,304 +1,137 @@
-import httpx
-import logging
+"""Bounded, source-grounded OpenAlex client."""
 import asyncio
-from typing import Dict, Any, List, Optional
+import logging
+from typing import Any
+from urllib.parse import urlparse
+
+import httpx
+from fastapi import HTTPException
+
 from app.config import settings
-from app.database import get_cached_entity, set_cached_entity
 
-logger = logging.getLogger("openalex_service")
+logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Offline / Seed Data for instant fallback & high reliability
-# ---------------------------------------------------------------------------
-SEED_WORKS = [
-    {
-        "id": "W2741809807",
-        "title": "Graph Attention Networks",
-        "publication_year": 2018,
-        "cited_by_count": 14200,
-        "type": "paper",
-        "venue": "ICLR 2018",
-        "doi": "https://doi.org/10.48550/arXiv.1710.10903",
-        "open_access": True,
-        "abstract": "We present graph attention networks (GATs), novel neural network architectures that operate on graph-structured data, leveraging masked self-attensional layers to address the shortcomings of prior graph convolution methods.",
-        "authors": [
-            {"id": "A5001", "name": "Petar Veličković", "institution": "University of Cambridge"},
-            {"id": "A5002", "name": "Guillem Cucurull", "institution": "Universitat Autònoma de Barcelona"},
-            {"id": "A5003", "name": "Arantxa Casanova", "institution": "Montreal Institute for Learning Algorithms"},
-            {"id": "A5004", "name": "Adriana Romero", "institution": "Facebook AI Research"},
-            {"id": "A5005", "name": "Pietro Liò", "institution": "University of Cambridge"},
-            {"id": "A5006", "name": "Yoshua Bengio", "institution": "MILA, Université de Montréal"}
-        ],
-        "topics": ["Graph Neural Networks", "Deep Learning", "Attention Mechanisms"],
-        "citations": ["W2562470718", "W2107936166", "W2147152072"],
-        "cited_by": ["W3091234567", "W3109876543", "W3112345678"]
-    },
-    {
-        "id": "W2562470718",
-        "title": "Semi-Supervised Classification with Graph Convolutional Networks",
-        "publication_year": 2017,
-        "cited_by_count": 22400,
-        "type": "paper",
-        "venue": "ICLR 2017",
-        "doi": "https://doi.org/10.48550/arXiv.1609.02907",
-        "open_access": True,
-        "abstract": "We present a scalable approach for semi-supervised learning on graph-structured data that is based on an efficient variant of convolutional neural networks which operate directly on graphs.",
-        "authors": [
-            {"id": "A5007", "name": "Thomas N. Kipf", "institution": "University of Amsterdam"},
-            {"id": "A5008", "name": "Max Welling", "institution": "University of Amsterdam"}
-        ],
-        "topics": ["Graph Neural Networks", "Semi-Supervised Learning"],
-        "citations": ["W2107936166", "W2147152072"],
-        "cited_by": ["W2741809807", "W3091234567"]
-    },
-    {
-        "id": "W2964257017",
-        "title": "Attention Is All You Need",
-        "publication_year": 2017,
-        "cited_by_count": 115000,
-        "type": "paper",
-        "venue": "NeurIPS 2017",
-        "doi": "https://doi.org/10.48550/arXiv.1706.03762",
-        "open_access": True,
-        "abstract": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. We propose the Transformer, a model architecture relying entirely on an attention mechanism to draw global dependencies between input and output.",
-        "authors": [
-            {"id": "A5010", "name": "Ashish Vaswani", "institution": "Google Brain"},
-            {"id": "A5011", "name": "Noam Shazeer", "institution": "Google Brain"},
-            {"id": "A5012", "name": "Niki Parmar", "institution": "Google Research"},
-            {"id": "A5013", "name": "Jakob Uszkoreit", "institution": "Google Research"},
-            {"id": "A5014", "name": "Llion Jones", "institution": "Google Research"},
-            {"id": "A5015", "name": "Aidan N. Gomez", "institution": "University of Toronto"},
-            {"id": "A5016", "name": "Łukasz Kaiser", "institution": "Google Brain"},
-            {"id": "A5017", "name": "Illia Polosukhin", "institution": "Near Protocol"}
-        ],
-        "topics": ["Attention Mechanisms", "Transformers", "Natural Language Processing"],
-        "citations": ["W2107936166"],
-        "cited_by": ["W2741809807", "W3109876543", "W3201928374"]
-    },
-    {
-        "id": "W3091234567",
-        "title": "Inductive Representation Learning on Large Graphs (GraphSAGE)",
-        "publication_year": 2017,
-        "cited_by_count": 12800,
-        "type": "paper",
-        "venue": "NeurIPS 2017",
-        "doi": "https://doi.org/10.48550/arXiv.1706.02216",
-        "open_access": True,
-        "abstract": "Low-dimensional embeddings of nodes in large graphs have shown to be useful in a variety of prediction tasks. However, existing approaches require all nodes in the graph to be present during training. We present GraphSAGE, an inductive framework that leverages node feature information to efficiently generate node embeddings for previously unseen data.",
-        "authors": [
-            {"id": "A5020", "name": "William L. Hamilton", "institution": "Stanford University"},
-            {"id": "A5021", "name": "Rex Ying", "institution": "Stanford University"},
-            {"id": "A5022", "name": "Jure Leskovec", "institution": "Stanford University"}
-        ],
-        "topics": ["Graph Representation Learning", "Graph Neural Networks"],
-        "citations": ["W2562470718"],
-        "cited_by": ["W3112345678"]
-    },
-    {
-        "id": "W3109876543",
-        "title": "Federated Learning: Challenges, Methods, and Future Directions",
-        "publication_year": 2020,
-        "cited_by_count": 5600,
-        "type": "paper",
-        "venue": "IEEE Signal Processing Magazine",
-        "doi": "https://doi.org/10.1109/MSP.2020.2975749",
-        "open_access": True,
-        "abstract": "Federated learning involves training statistical models over remote devices or data centers while keeping data localized. In this paper we outline the unique characteristics, challenges, and recent algorithmic advances in federated optimization.",
-        "authors": [
-            {"id": "A5030", "name": "Tian Li", "institution": "Carnegie Mellon University"},
-            {"id": "A5031", "name": "Anit Kumar Sahu", "institution": "Bosch Center for AI"},
-            {"id": "A5032", "name": "Ameet Talwalkar", "institution": "Carnegie Mellon University"},
-            {"id": "A5033", "name": "Virginia Smith", "institution": "Carnegie Mellon University"}
-        ],
-        "topics": ["Federated Learning", "Distributed Machine Learning", "Privacy-Preserving AI"],
-        "citations": ["W2964257017"],
-        "cited_by": ["W3201928374"]
-    },
-    {
-        "id": "W3112345678",
-        "title": "Graph Neural Networks in Bioinformatics and Healthcare",
-        "publication_year": 2021,
-        "cited_by_count": 3400,
-        "type": "paper",
-        "venue": "Briefings in Bioinformatics",
-        "doi": "https://doi.org/10.1093/bib/bbab123",
-        "open_access": True,
-        "abstract": "Graph neural networks have rapidly expanded into biomedical applications, enabling state-of-the-art modeling of molecular structures, drug target interactions, and disease propagation networks.",
-        "authors": [
-            {"id": "A5005", "name": "Pietro Liò", "institution": "University of Cambridge"},
-            {"id": "A5040", "name": "Michael M. Bronstein", "institution": "University of Oxford"}
-        ],
-        "topics": ["Graph Neural Networks", "Healthcare", "Bioinformatics"],
-        "citations": ["W2741809807", "W3091234567"],
-        "cited_by": []
-    },
-    {
-        "id": "W3201928374",
-        "title": "Large Language Models for Graph-Structured Reasoning",
-        "publication_year": 2023,
-        "cited_by_count": 1850,
-        "type": "paper",
-        "venue": "ACL 2023",
-        "doi": "https://doi.org/10.18653/v1/2023.acl-main.456",
-        "open_access": True,
-        "abstract": "We investigate how pretrained large language models can perform zero-shot and few-shot reasoning over complex graph structures when provided with relational prompt encodings.",
-        "authors": [
-            {"id": "A5001", "name": "Petar Veličković", "institution": "DeepMind"},
-            {"id": "A5050", "name": "Jian Tang", "institution": "MILA"}
-        ],
-        "topics": ["Graph Neural Networks", "Transformers", "Large Language Models"],
-        "citations": ["W2964257017", "W2741809807"],
-        "cited_by": []
+
+def openalex_id(value: str | None) -> str | None:
+    if not value:
+        return None
+    return value.rstrip("/").split("/")[-1]
+
+
+def reconstruct_abstract(inverted: dict | None) -> str | None:
+    if not inverted:
+        return None
+    words: list[str | None] = []
+    for word, positions in inverted.items():
+        for position in positions:
+            if position >= len(words):
+                words.extend([None] * (position + 1 - len(words)))
+            words[position] = word
+    return " ".join(word for word in words if word)
+
+
+def normalize_work(item: dict[str, Any]) -> dict[str, Any]:
+    location = item.get("primary_location") or {}
+    source = location.get("source") or {}
+    oa = item.get("open_access") or {}
+    authors = []
+    for authorship in item.get("authorships") or []:
+        author = authorship.get("author") or {}
+        if not author.get("id") and not author.get("display_name"):
+            continue
+        authors.append({
+            "id": openalex_id(author.get("id")), "name": author.get("display_name"),
+            "institutions": [{"id": openalex_id(i.get("id")), "name": i.get("display_name")}
+                             for i in authorship.get("institutions") or [] if i.get("display_name")]
+        })
+    doi = item.get("doi")
+    topic_records = [{"id": openalex_id(t.get("id")), "name": t.get("display_name"), "source_url": t.get("id")}
+                     for t in item.get("topics") or [] if t.get("display_name")]
+    topics = [t["name"] for t in topic_records]
+    primary_topic = item.get("primary_topic") or {}
+    if primary_topic.get("display_name") and primary_topic["display_name"] not in topics:
+        topics.insert(0, primary_topic["display_name"])
+        topic_records.insert(0, {"id": openalex_id(primary_topic.get("id")), "name": primary_topic["display_name"], "source_url": primary_topic.get("id")})
+    best_oa = item.get("best_oa_location") or {}
+    pdf = (location.get("pdf_url") if location else None) or best_oa.get("pdf_url")
+    landing = location.get("landing_page_url") or best_oa.get("landing_page_url") or oa.get("oa_url")
+    return {
+        "id": openalex_id(item.get("id")), "source_id": item.get("id"), "source_url": item.get("id"),
+        "type": "paper", "title": item.get("title"), "publication_year": item.get("publication_year"),
+        "publication_date": item.get("publication_date"), "venue": source.get("display_name"),
+        "doi": doi, "citation_count": item.get("cited_by_count"), "abstract": reconstruct_abstract(item.get("abstract_inverted_index")),
+        "authors": authors, "topics": topics, "topic_records": topic_records, "open_access": oa.get("is_oa"), "open_access_pdf": pdf,
+        "landing_page": landing, "referenced_works": [openalex_id(x) for x in item.get("referenced_works") or [] if openalex_id(x)],
+        "related_works": [openalex_id(x) for x in item.get("related_works") or [] if openalex_id(x)],
+        "cited_by_api_url": item.get("cited_by_api_url"),
     }
-]
+
 
 class OpenAlexService:
     def __init__(self):
-        self.base_url = settings.OPENALEX_BASE_URL
-        self.headers = {
-            "User-Agent": f"ResearchGraph/1.0 (mailto:{settings.OPENALEX_MAILTO})"
-        }
+        self.base_url = settings.OPENALEX_BASE_URL.rstrip("/")
+        self.headers = {"User-Agent": f"ResearchGraph/1.0 (mailto:{settings.OPENALEX_MAILTO})"}
 
-    async def search(self, query: str, entity_type: str = "works", limit: int = 15) -> List[Dict[str, Any]]:
-        """Search OpenAlex entities (works, authors, concepts/topics, institutions) with DB cache + offline fallback."""
-        cache_key = f"search:{entity_type}:{query.lower().strip()}:{limit}"
-        cached = get_cached_entity(cache_key)
-        if cached:
-            return cached
-
-        # Attempt API call
-        url = f"{self.base_url}/{entity_type}"
-        params = {"search": query, "per_page": limit}
+    async def _get_json(self, path: str, params: dict | None = None) -> dict:
+        request_params = dict(params or {})
         if settings.OPENALEX_API_KEY:
-            params["api_key"] = settings.OPENALEX_API_KEY
+            request_params["api_key"] = settings.OPENALEX_API_KEY
+        last_error = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(headers=self.headers, timeout=12.0) as client:
+                    response = await client.get(f"{self.base_url}/{path.lstrip('/')}", params=request_params)
+                if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                    await asyncio.sleep(0.25 * (attempt + 1))
+                    continue
+                if response.status_code == 404:
+                    raise HTTPException(status_code=404, detail="This OpenAlex record was not found.")
+                response.raise_for_status()
+                return response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                last_error = exc
+                if attempt < 2:
+                    await asyncio.sleep(0.25 * (attempt + 1))
+        logger.warning("OpenAlex request failed: %s", last_error)
+        raise HTTPException(status_code=502, detail="OpenAlex could not retrieve scholarly data. Please retry.")
 
-        try:
-            async with httpx.AsyncClient(headers=self.headers, timeout=5.0) as client:
-                resp = await client.get(url, params=params)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    results = self._transform_openalex_results(data.get("results", []), entity_type)
-                    if results:
-                        set_cached_entity(cache_key, results)
-                        return results
-        except Exception as e:
-            logger.warning(f"OpenAlex API call failed: {e}. Falling back to seed dataset.")
+    async def search(self, query: str, entity_type: str = "works", limit: int = 15, page: int = 1) -> list[dict]:
+        data = await self._get_json(entity_type, {"search": query, "per_page": limit, "page": page})
+        if entity_type != "works":
+            return [self._normalize_entity(x, entity_type) for x in data.get("results", [])]
+        return [self.to_search_item(normalize_work(x)) for x in data.get("results", [])]
 
-        # Fallback to seed dataset matching query
-        fallback_results = self._search_seed(query, entity_type)
-        return fallback_results
+    def to_search_item(self, work: dict) -> dict:
+        return {"id": work["id"], "type": "paper", "title": work.get("title") or "Not available in the source",
+                "subtitle": " · ".join(filter(None, [work.get("venue"), str(work.get("publication_year") or "")])),
+                "year": work.get("publication_year"), "citation_count": work.get("citation_count"), "venue": work.get("venue"),
+                "authors": [a["name"] for a in work.get("authors", []) if a.get("name")], "open_access": work.get("open_access"),
+                "source_id": work.get("source_id"), "source_url": work.get("source_url")}
 
-    def _search_seed(self, query: str, entity_type: str) -> List[Dict[str, Any]]:
-        q = query.lower()
-        results = []
-        if entity_type in ["works", "paper"]:
-            for item in SEED_WORKS:
-                if q in item["title"].lower() or any(q in t.lower() for t in item["topics"]):
-                    results.append({
-                        "id": item["id"],
-                        "type": "paper",
-                        "title": item["title"],
-                        "subtitle": f"{item['venue']} ({item['publication_year']})",
-                        "year": item["publication_year"],
-                        "citation_count": item["cited_by_count"],
-                        "venue": item["venue"],
-                        "authors": [a["name"] for a in item["authors"]],
-                        "open_access": item["open_access"]
-                    })
-            if not results:  # Return default list if query not matching seed exactly
-                for item in SEED_WORKS[:5]:
-                    results.append({
-                        "id": item["id"],
-                        "type": "paper",
-                        "title": item["title"],
-                        "subtitle": f"{item['venue']} ({item['publication_year']})",
-                        "year": item["publication_year"],
-                        "citation_count": item["cited_by_count"],
-                        "venue": item["venue"],
-                        "authors": [a["name"] for a in item["authors"]],
-                        "open_access": item["open_access"]
-                    })
-        elif entity_type in ["authors", "author"]:
-            seen_authors = {}
-            for item in SEED_WORKS:
-                for a in item["authors"]:
-                    if a["id"] not in seen_authors:
-                        seen_authors[a["id"]] = {
-                            "id": a["id"],
-                            "type": "author",
-                            "title": a["name"],
-                            "subtitle": a["institution"],
-                            "works_count": 1,
-                            "citation_count": item["cited_by_count"]
-                        }
-            results = list(seen_authors.values())
-        elif entity_type in ["topics", "concepts", "topic"]:
-            topics = ["Graph Neural Networks", "Attention Mechanisms", "Semi-Supervised Learning", "Transformers", "Federated Learning", "Healthcare"]
-            for t in topics:
-                if not q or q in t.lower():
-                    results.append({
-                        "id": f"T_{t.replace(' ', '_')}",
-                        "type": "topic",
-                        "title": t,
-                        "subtitle": "Research Field",
-                        "works_count": 420,
-                        "citation_count": 54000
-                    })
-        return results
+    async def get_work(self, work_id: str) -> dict:
+        wid = openalex_id(work_id)
+        if not wid or not wid.startswith("W"):
+            raise HTTPException(status_code=422, detail="A valid OpenAlex work ID is required.")
+        result = await self._get_json(f"works/{wid}")
+        return normalize_work(result)
 
-    def _transform_openalex_results(self, raw_results: List[Dict[str, Any]], entity_type: str) -> List[Dict[str, Any]]:
-        transformed = []
-        for item in raw_results:
-            alex_id = item.get("id", "").split("/")[-1]
-            if entity_type == "works":
-                title = item.get("title") or "Untitled Paper"
-                publication_year = item.get("publication_year")
-                cited_by_count = item.get("cited_by_count", 0)
-                primary_loc = item.get("primary_location") or {}
-                source = primary_loc.get("source") or {}
-                venue = source.get("display_name", "Academic Venue")
-                authorships = item.get("authorships", [])
-                author_names = [a.get("author", {}).get("display_name") for a in authorships if a.get("author")]
-                transformed.append({
-                    "id": alex_id,
-                    "type": "paper",
-                    "title": title,
-                    "subtitle": f"{venue} ({publication_year})",
-                    "year": publication_year,
-                    "citation_count": cited_by_count,
-                    "venue": venue,
-                    "authors": author_names,
-                    "open_access": item.get("open_access", {}).get("is_oa", False)
-                })
-            elif entity_type == "authors":
-                name = item.get("display_name", "Unknown Researcher")
-                inst = "Scholarly Institution"
-                last_known = item.get("last_known_institution")
-                if last_known:
-                    inst = last_known.get("display_name", inst)
-                transformed.append({
-                    "id": alex_id,
-                    "type": "author",
-                    "title": name,
-                    "subtitle": inst,
-                    "works_count": item.get("works_count", 0),
-                    "citation_count": item.get("cited_by_count", 0)
-                })
-            elif entity_type in ["topics", "concepts"]:
-                transformed.append({
-                    "id": alex_id,
-                    "type": "topic",
-                    "title": item.get("display_name", "Research Topic"),
-                    "subtitle": item.get("description", "Field of Study"),
-                    "works_count": item.get("works_count", 0),
-                    "citation_count": item.get("cited_by_count", 0)
-                })
-        return transformed
+    async def get_works(self, ids: list[str], limit: int = 40) -> list[dict]:
+        ids = list(dict.fromkeys(openalex_id(x) for x in ids if openalex_id(x)))[:limit]
+        if not ids:
+            return []
+        data = await self._get_json("works", {"filter": "openalex:" + "|".join(ids), "per_page": min(limit, 50)})
+        return [normalize_work(x) for x in data.get("results", [])]
 
-    def get_seed_work_details(self, work_id: str) -> Optional[Dict[str, Any]]:
-        for item in SEED_WORKS:
-            if item["id"] == work_id:
-                return item
-        return SEED_WORKS[0]
+    async def citing_works(self, work_id: str, limit: int = 20) -> list[dict]:
+        data = await self._get_json("works", {"filter": f"cites:{openalex_id(work_id)}", "per_page": min(limit, 50), "sort": "publication_date:desc"})
+        return [normalize_work(x) for x in data.get("results", [])]
+
+    def _normalize_entity(self, item: dict, entity_type: str) -> dict:
+        kind = {"authors": "author", "institutions": "institution", "topics": "topic", "concepts": "topic"}.get(entity_type, "topic")
+        return {"id": openalex_id(item.get("id")), "type": kind,
+                "title": item.get("display_name") or "Not available in the source", "subtitle": None,
+                "works_count": item.get("works_count"), "citation_count": item.get("cited_by_count"),
+                "source_id": item.get("id"), "source_url": item.get("id")}
+
 
 openalex_service = OpenAlexService()

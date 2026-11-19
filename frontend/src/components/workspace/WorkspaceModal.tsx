@@ -11,6 +11,7 @@ interface WorkspaceModalProps {
 export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ onClose, onOpenPaperStudy }) => {
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     loadBookmarks();
@@ -18,15 +19,16 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ onClose, onOpenP
 
   const loadBookmarks = () => {
     setLoading(true);
+    setError('');
     api.fetchBookmarks()
       .then((res) => setBookmarks(res))
-      .catch((err) => console.error(err))
+      .catch((err) => setError(err.message || 'Could not load workspace.'))
       .finally(() => setLoading(false));
   };
 
   const handleRemove = async (entityId: string) => {
-    await api.removeBookmark(entityId);
-    loadBookmarks();
+    try { await api.removeBookmark(entityId); loadBookmarks(); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Could not remove bookmark.'); }
   };
 
   const handleExportBibtex = () => {
@@ -54,6 +56,8 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ onClose, onOpenP
         <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
           {loading ? (
             <div className="text-center py-8 text-neutral-500">Loading saved bookmarks...</div>
+          ) : error ? (
+            <div className="text-center py-8 text-rose-700">{error}<button onClick={loadBookmarks} className="ml-2 underline">Retry</button></div>
           ) : bookmarks.length === 0 ? (
             <div className="text-center py-12 text-neutral-400">
               No saved papers or entities yet. Click "Save to Workspace" in any node panel to save items here.

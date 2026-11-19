@@ -10,25 +10,27 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ query })
   const [pagerank, setPagerank] = useState<any[]>([]);
   const [centrality, setCentrality] = useState<any>({ degree_centrality: [], betweenness_centrality: [] });
   const [communities, setCommunities] = useState<any[]>([]);
-  const [sourceNode, setSourceNode] = useState('W2741809807');
-  const [targetNode, setTargetNode] = useState('W3112345678');
+  const [sourceNode, setSourceNode] = useState('');
+  const [targetNode, setTargetNode] = useState('');
   const [pathResult, setPathResult] = useState<any>(null);
   const [loadingPath, setLoadingPath] = useState(false);
   const [showFormulae, setShowFormulae] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    api.fetchPageRankLeaderboard(query).then((res) => setPagerank(res.rankings || []));
-    api.fetchCentralityLeaderboard(query).then((res) => setCentrality(res));
-    api.fetchCommunities(query).then((res) => setCommunities(res.communities || []));
+    Promise.all([api.fetchPageRankLeaderboard(query), api.fetchCentralityLeaderboard(query), api.fetchCommunities(query)])
+      .then(([rank, central, community]) => { setPagerank(rank.rankings || []); setCentrality(central); setCommunities(community.communities || []); setError(''); })
+      .catch((err) => setError(err.message || 'Could not load graph measures.'));
   }, [query]);
 
   const handleFindPath = async () => {
+    if (!sourceNode || !targetNode) return;
     setLoadingPath(true);
     try {
       const res = await api.findShortestPath(sourceNode, targetNode);
       setPathResult(res);
     } catch (err) {
-      console.error(err);
+      setError(err instanceof Error ? err.message : 'Could not calculate a path.');
     } finally {
       setLoadingPath(false);
     }
@@ -44,7 +46,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ query })
             <span>Research Insights</span>
           </h2>
           <p className="text-xs text-neutral-500 mt-1">
-            Empirical research outcomes derived from network structure and citation influence in {query}.
+            Network measures calculated from the bounded OpenAlex records retrieved for {query}.
           </p>
         </div>
 
@@ -57,6 +59,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ query })
           {showFormulae ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
       </div>
+      {error && <p role="alert" className="text-sm text-rose-700 bg-rose-50 p-3 rounded-lg">{error}</p>}
 
       {/* Collapsable Graph Theory Formulae for Evaluator */}
       {showFormulae && (
@@ -72,7 +75,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ query })
               C_B(v) = Σ (σ_st(v) / σ_st)
             </div>
             <div className="bg-academic-800 p-3 rounded-xl border border-academic-700">
-              <strong className="text-white block font-sans text-xs mb-1">Louvain Modularity:</strong>
+              <strong className="text-white block font-sans text-xs mb-1">Greedy Modularity:</strong>
               Q = 1/2m * Σ [A_ij - k_i*k_j/2m] δ(c_i, c_j)
             </div>
           </div>
@@ -85,10 +88,11 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ query })
         <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-xs space-y-3">
           <h3 className="text-sm font-bold text-neutral-900 flex items-center space-x-2">
             <Award className="w-4 h-4 text-amber-500" />
-            <span>⭐ Influential Papers in This Field</span>
+            <span>Highest PageRank in Retrieved Graph</span>
           </h3>
-          <p className="text-xs text-neutral-500">Papers with highest network prestige and citation influence.</p>
+          <p className="text-xs text-neutral-500">PageRank on the retrieved citation graph; this is a network measure, not a quality judgment.</p>
           <div className="space-y-2">
+            {pagerank.length === 0 && <p className="text-xs text-neutral-500">No citation edges were retrieved for this search.</p>}
             {pagerank.slice(0, 5).map((item, idx) => (
               <div key={idx} className="flex items-center justify-between p-3 rounded-xl border border-neutral-100 hover:bg-neutral-50 text-xs">
                 <div className="flex items-center space-x-3 truncate">
@@ -111,13 +115,14 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ query })
             <GitCommit className="w-4 h-4 text-indigo-600" />
             <span>🔗 Bridge Researchers</span>
           </h3>
-          <p className="text-xs text-neutral-500">Authors connecting otherwise separate research communities.</p>
+          <p className="text-xs text-neutral-500">Authors ranked by betweenness centrality in the retrieved graph.</p>
           <div className="space-y-2">
-            {centrality.betweenness_centrality.slice(0, 5).map((item: any, idx: number) => (
+            {centrality.betweenness_centrality.filter((item: any) => item.type === 'author').length === 0 && <p className="text-xs text-neutral-500">No author centrality results are available.</p>}
+            {centrality.betweenness_centrality.filter((item: any) => item.type === 'author').slice(0, 5).map((item: any, idx: number) => (
               <div key={idx} className="flex items-center justify-between p-3 rounded-xl border border-neutral-100 hover:bg-neutral-50 text-xs">
                 <div>
                   <span className="font-semibold text-neutral-900 block">{item.label}</span>
-                  <span className="text-[10px] text-neutral-400 uppercase font-mono">Role: Cross-domain author</span>
+                  <span className="text-[10px] text-neutral-400 uppercase font-mono">Author · retrieved graph</span>
                 </div>
                 <span className="font-mono text-xs font-bold text-academic-900 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
                   Bridge Score: {item.score.toFixed(3)}
@@ -134,8 +139,9 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ query })
           <Network className="w-4 h-4 text-teal-700" />
           <span>🧩 Major Research Communities</span>
         </h3>
-        <p className="text-xs text-neutral-500">Thematic clusters automatically detected from citation & author relationships.</p>
+        <p className="text-xs text-neutral-500">Structural communities detected over retrieved relationships; clusters are not scientific findings.</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {communities.length === 0 && <p className="text-xs text-neutral-500">No communities could be calculated for this graph.</p>}
           {communities.map((comm) => (
             <div key={comm.id} className="p-4 rounded-xl border border-neutral-200 bg-neutral-50 space-y-2 text-xs flex flex-col justify-between">
               <div>
@@ -148,6 +154,14 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ query })
             </div>
           ))}
         </div>
+      </div>
+      <div className="bg-white p-5 rounded-2xl border border-neutral-200 space-y-3">
+        <h3 className="text-sm font-bold">Directed citation path</h3>
+        <p className="text-xs text-neutral-500">Enter two OpenAlex work IDs. The search follows citation arrows from the source paper to its references.</p>
+        <div className="flex gap-2"><input value={sourceNode} onChange={e => setSourceNode(e.target.value)} placeholder="Source work ID (W…)" className="border rounded px-2 py-1 text-xs" />
+          <input value={targetNode} onChange={e => setTargetNode(e.target.value)} placeholder="Target work ID (W…)" className="border rounded px-2 py-1 text-xs" />
+          <button disabled={!sourceNode || !targetNode || loadingPath} onClick={handleFindPath} className="px-3 py-1 bg-academic-900 text-white rounded text-xs disabled:opacity-50">{loadingPath ? 'Searching…' : 'Find path'}</button></div>
+        {pathResult && <p className="text-xs text-neutral-700">{pathResult.found ? pathResult.path_details?.map((node: any) => node.label).join(' → ') : pathResult.message}</p>}
       </div>
     </div>
   );

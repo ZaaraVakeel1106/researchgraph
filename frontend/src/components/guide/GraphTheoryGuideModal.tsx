@@ -8,9 +8,10 @@ interface GraphTheoryGuideModalProps {
 
 export const GraphTheoryGuideModal: React.FC<GraphTheoryGuideModalProps> = ({ onClose }) => {
   const [docData, setDocData] = useState<any>(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    api.fetchGraphTheoryDocs().then((res) => setDocData(res)).catch(console.error);
+    api.fetchGraphTheoryDocs().then((res) => setDocData(res)).catch((err) => setError(err.message || 'Could not load documentation.'));
   }, []);
 
   return (
@@ -35,7 +36,7 @@ export const GraphTheoryGuideModal: React.FC<GraphTheoryGuideModalProps> = ({ on
 
         {/* Content */}
         <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
-          {docData?.sections ? (
+          {error ? <p role="alert" className="text-rose-700">{error}</p> : docData?.sections ? (
             docData.sections.map((sec: any, idx: number) => (
               <div key={idx} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 space-y-1">
                 <h3 className="font-bold text-neutral-900 text-sm">{sec.topic}</h3>
