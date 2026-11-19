@@ -49,6 +49,8 @@ class SearchResponse(BaseModel):
     query: str
     total_results: int
     results: List[SearchResultItem]
+    provider_total: Optional[int] = None
+    next_cursor: Optional[str] = None
 
 # Paper Study View
 class AbstractSection(BaseModel):

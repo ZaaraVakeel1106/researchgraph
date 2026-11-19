@@ -74,6 +74,16 @@ export interface SearchItem {
   venue?: string;
   authors?: string[];
   open_access?: boolean;
+  source_id?: string;
+  source_url?: string;
+}
+
+export interface SearchPage {
+  query: string;
+  total_results: number;
+  provider_total?: number | null;
+  next_cursor?: string | null;
+  results: SearchItem[];
 }
 
 export interface AbstractSection {

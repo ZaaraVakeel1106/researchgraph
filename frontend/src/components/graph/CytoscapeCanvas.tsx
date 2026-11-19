@@ -1,6 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import cytoscape, { Core, EventObject } from 'cytoscape';
-import { ResearchGraphData, GraphNode, RelevanceTier } from '../../types';
+import { ResearchGraphData, GraphNode } from '../../types';
+
+const graphColors = {
+  paper: '#91A9B8',
+  author: '#D9B77E',
+  institution: '#8DA58B',
+  topic: '#D98E83',
+  text: '#252824',
+  edge: '#85877F',
+  muted: '#85877F',
+  highlight: '#D9F238',
+  citation: '#62665F',
+};
 
 interface CytoscapeCanvasProps {
   graphData: ResearchGraphData;
@@ -29,24 +41,24 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
         const pr = n.metrics?.pagerank || 0.01;
         const size = Math.max(34, Math.min(75, 34 + pr * 300));
         
-        let color = '#0f766e'; // paper
+        let color = graphColors.paper;
         let shape = 'round-rectangle';
-        if (n.type === 'author') { color = '#d97706'; shape = 'ellipse'; }
-        else if (n.type === 'institution') { color = '#4338ca'; shape = 'round-rectangle'; }
-        else if (n.type === 'topic') { color = '#e11d48'; shape = 'hexagon'; }
+        if (n.type === 'author') { color = graphColors.author; shape = 'ellipse'; }
+        else if (n.type === 'institution') { color = graphColors.institution; shape = 'round-rectangle'; }
+        else if (n.type === 'topic') { color = graphColors.topic; shape = 'hexagon'; }
 
         // Tier border colors
-        let borderColor = '#ffffff';
+        let borderColor = '#FFFFFF';
         let borderWidth = 2;
         let borderStyle = 'solid';
         if (n.relevance_tier === 'core') {
-          borderColor = '#0f766e';
+          borderColor = graphColors.highlight;
           borderWidth = 3;
         } else if (n.relevance_tier === 'related') {
-          borderColor = '#3b82f6';
+          borderColor = graphColors.muted;
           borderWidth = 2;
         } else if (n.relevance_tier === 'adjacent') {
-          borderColor = '#f59e0b';
+          borderColor = graphColors.paper;
           borderWidth = 2;
           borderStyle = 'dashed';
         }
@@ -101,9 +113,9 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
             'width': 'data(size)',
             'height': 'data(size)',
             'shape': 'data(shape)' as any,
-            'color': '#111827',
-            'font-size': '11px',
-            'font-family': 'Inter, sans-serif',
+            'color': graphColors.text,
+            'font-size': '10px',
+            'font-family': 'DM Sans, sans-serif',
             'font-weight': 600,
             'text-valign': 'bottom',
             'text-margin-y': 5,
@@ -120,8 +132,8 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
           selector: 'edge',
           style: {
             'width': 'mapData(weight, 1, 5, 1.5, 4)',
-            'line-color': '#cbd5e1',
-            'target-arrow-color': '#94a3b8',
+            'line-color': graphColors.edge,
+            'target-arrow-color': graphColors.citation,
             'target-arrow-shape': 'triangle',
             'curve-style': 'bezier',
             'opacity': 0.65,
@@ -133,25 +145,25 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
           selector: 'node:selected',
           style: {
             'border-width': 5,
-            'border-color': '#0f766e',
-            'overlay-color': '#0f766e',
+            'border-color': graphColors.highlight,
+            'overlay-color': graphColors.highlight,
             'overlay-opacity': 0.25,
             'overlay-padding': 8
           }
         },
-        { selector: 'edge[type = "cites"]', style: { 'line-color': '#0f766e', 'target-arrow-color': '#0f766e' } },
-        { selector: 'edge[type = "authored"]', style: { 'line-color': '#d97706', 'target-arrow-shape': 'none', 'line-style': 'dashed' } },
-        { selector: 'edge[type = "affiliated_with"]', style: { 'line-color': '#6366f1', 'target-arrow-shape': 'none', 'line-style': 'dotted' } },
-        { selector: 'edge[type = "has_topic"]', style: { 'line-color': '#e11d48', 'target-arrow-shape': 'none', 'line-style': 'dashed' } },
-        { selector: 'edge[type = "related_work"]', style: { 'line-color': '#64748b', 'target-arrow-shape': 'none', 'line-style': 'dotted' } },
-        { selector: 'edge[type = "collaborates_with"]', style: { 'line-color': '#d97706', 'target-arrow-shape': 'none', 'line-style': 'dashed' } },
-        { selector: 'edge[type = "topic_association"]', style: { 'line-color': '#e11d48', 'target-arrow-shape': 'none', 'line-style': 'dotted' } },
+        { selector: 'edge[type = "cites"]', style: { 'line-color': graphColors.citation, 'target-arrow-color': graphColors.citation, 'width': 1.6 } },
+        { selector: 'edge[type = "authored"]', style: { 'line-color': graphColors.muted, 'target-arrow-shape': 'none', 'line-style': 'dashed' } },
+        { selector: 'edge[type = "affiliated_with"]', style: { 'line-color': graphColors.muted, 'target-arrow-shape': 'none', 'line-style': 'dotted' } },
+        { selector: 'edge[type = "has_topic"]', style: { 'line-color': graphColors.muted, 'target-arrow-shape': 'none', 'line-style': 'dashed' } },
+        { selector: 'edge[type = "related_work"]', style: { 'line-color': graphColors.muted, 'target-arrow-shape': 'none', 'line-style': 'dotted' } },
+        { selector: 'edge[type = "collaborates_with"]', style: { 'line-color': graphColors.muted, 'target-arrow-shape': 'none', 'line-style': 'dashed' } },
+        { selector: 'edge[type = "topic_association"]', style: { 'line-color': graphColors.muted, 'target-arrow-shape': 'none', 'line-style': 'dotted' } },
         {
           selector: '.highlighted',
           style: {
             'opacity': 1,
             'border-width': 4,
-            'border-color': '#111827'
+            'border-color': graphColors.highlight
           }
         },
         {
@@ -164,7 +176,7 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
           selector: '.edge-highlighted',
           style: {
             'opacity': 1,
-            'line-color': '#0f766e',
+            'line-color': graphColors.highlight,
             'width': 3
           }
         }
@@ -277,11 +289,11 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
   const handleFit = () => cyRef.current?.fit(undefined, 40);
 
   return (
-    <div className="relative w-full h-full min-h-[550px] overflow-hidden bg-neutral-50 rounded-2xl border border-neutral-200 shadow-inner">
+    <div className="relative w-full h-full min-h-[380px] overflow-hidden bg-app rounded-xl border border-neutral-200">
       <div ref={containerRef} className="cy-container" />
 
       {/* Canvas Floating Controls */}
-      <div className="absolute bottom-4 left-4 z-10 flex flex-col space-y-1 bg-white/95 backdrop-blur-md p-1.5 rounded-xl border border-neutral-200 shadow-sm text-neutral-700">
+      <div className="absolute bottom-4 left-4 z-10 flex flex-col space-y-1 bg-white/95 p-1.5 rounded-xl border border-neutral-200 shadow-sm text-neutral-700">
         <button
           onClick={handleZoomIn}
           title="Zoom In"
@@ -306,7 +318,7 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
       </div>
 
       {/* Floating Legend */}
-      <div className="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur-md px-3 py-2 rounded-xl border border-neutral-200 shadow-sm text-xs space-y-1 text-neutral-700">
+      <div className="absolute top-4 left-4 z-10 bg-white/95 px-3 py-2 rounded-xl border border-neutral-200 shadow-sm text-xs space-y-1 text-neutral-700 max-w-[220px]">
         <div className="font-semibold text-[11px] text-neutral-500 uppercase tracking-wider mb-1">Graph Legend</div>
         <div className="text-[10px] text-neutral-500">Citation arrow: citing paper → referenced paper</div>
         <div className="flex items-center space-x-2">
@@ -325,7 +337,7 @@ export const CytoscapeCanvas: React.FC<CytoscapeCanvasProps> = ({
           <span className="w-2.5 h-2.5 rounded-full bg-topic" />
           <span>Topic</span>
         </div>
-        <div className="border-t pt-1 text-[10px] text-neutral-500">Teal arrows cite; amber links show authorship; blue links show affiliation; rose links show topics.</div>
+        <div className="border-t border-neutral-200 pt-1 text-[10px] text-neutral-500">Citing work → referenced work. Dashed and dotted lines show other recorded relationships.</div>
       </div>
     </div>
   );

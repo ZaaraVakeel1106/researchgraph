@@ -1,39 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+  --rg-bg: #E8E7DF;
+  --rg-sidebar: #F3F2EC;
+  --rg-panel: #F7F6F0;
+  --rg-panel-2: #ECEBE4;
+  --rg-panel-3: #FFFFFF;
+  --rg-text: #252824;
+  --rg-secondary: #62665F;
+  --rg-muted: #85877F;
+  --rg-lime: #D9F238;
+  --rg-sage: #8DA58B;
+  --rg-coral: #D98E83;
+  --rg-blue: #91A9B8;
+  --rg-amber: #D9B77E;
+  --rg-lavender-grey: #B3A8BA;
+  --rg-lime-contrast: #687822;
+  --rg-border: rgba(37, 40, 36, 0.12);
+}
+
 @layer base {
+  html { background: var(--rg-bg); }
   body {
-    @apply bg-[#fafafa] text-neutral-900 font-sans;
+    @apply font-sans antialiased;
+    margin: 0;
+    background: var(--rg-bg);
+    color: var(--rg-text);
   }
+  button, input, select, textarea { font: inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
+    outline: 2px solid var(--rg-lime-contrast);
+    outline-offset: 2px;
+  }
+  ::selection { background: rgba(217, 242, 56, .7); color: var(--rg-text); }
 }
 
-/* Custom scrollbars */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #d4d4d4;
-  border-radius: 9999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #a3a3a3;
+.rg-app {
+  min-height: 100vh;
+  background: var(--rg-bg);
+  color: var(--rg-text);
 }
 
-/* Cytoscape container styling */
+.rg-app .bg-white { background-color: var(--rg-panel-3); }
+.rg-app .bg-white\/95 { background-color: rgba(255, 255, 255, .96); }
+.rg-app .bg-white\/70 { background-color: rgba(255, 255, 255, .78); }
+.rg-app .bg-neutral-900\/60 { background-color: rgba(37, 40, 36, .55); }
+.rg-app .shadow-sm, .rg-app .shadow-xs { box-shadow: 0 4px 18px rgba(37, 40, 36, .07); }
+.rg-app .shadow-xl, .rg-app .shadow-2xl { box-shadow: 0 18px 54px rgba(37, 40, 36, .18); }
+.rg-app .rounded-2xl { border-radius: 16px; }
+.rg-app .rounded-xl { border-radius: 12px; }
+
+.font-editorial { font-family: 'Newsreader', Georgia, serif; }
+.rg-kicker {
+  color: var(--rg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+.rg-divider { border-color: var(--rg-border); }
+.rg-hero-surface {
+  background: linear-gradient(135deg, var(--rg-panel), var(--rg-panel-2));
+}
+
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #C4C5BB; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #A9ADA1; }
+
 .cy-container {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  position: absolute;
-  top: 0;
-  left: 0;
-  background-color: #fafafa;
+  background-color: var(--rg-bg);
 }
 
-.dark .cy-container {
-  background-color: #111827;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
